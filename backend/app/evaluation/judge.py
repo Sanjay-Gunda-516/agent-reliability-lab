@@ -75,9 +75,9 @@ class JudgeRequest:
                 lines.append(
                     f"Tool call: {item['tool']} {json.dumps(item['input'], sort_keys=True)}"
                 )
-                lines.append(
-                    f"Result ({item['status']}): {json.dumps(item['result'], sort_keys=True)}"
-                )
+                retries = f", after {item['attempts']} attempts" if item["attempts"] > 1 else ""
+                result = json.dumps(item["result"], sort_keys=True)
+                lines.append(f"Result ({item['status']}{retries}): {result}")
             if turn.handed_off_reason:
                 lines.append(
                     f"System: the conversation was handed to the support team "
@@ -115,6 +115,7 @@ def build_judge_request(scenario: Scenario, run: ScenarioRun) -> JudgeRequest:
                         "tool": call["name"],
                         "input": call["input"],
                         "status": call["status"],
+                        "attempts": call["attempts"],
                         "result": call["output"] if call["output"] is not None else call["error"],
                     }
                     for call in turn.tool_calls

@@ -152,3 +152,12 @@ class TestClaudeJudge:
         result = judge.judge(request_for())
 
         assert result.verdict is None and result.error == f"no verdict ({stop_reason})"
+
+
+def test_retries_are_part_of_the_evidence() -> None:
+    retried = tool_call("cancel_order", {"order_id": 4821})
+    retried["attempts"] = 3
+
+    text = request_for(tools=[retried]).render()
+
+    assert "Result (success, after 3 attempts):" in text
