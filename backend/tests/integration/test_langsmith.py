@@ -157,3 +157,17 @@ class TestClaudeInstrumentation:
             ls, "get_langsmith", lambda: ls.LangSmith(True, "test", RecordingClient())
         )
         assert ls.instrument(raw).beta.messages.create != original
+
+
+def test_unreachable_langsmith_does_not_affect_the_agent(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A real client pointed at a closed port: sending happens in the background.
+    unreachable = Client(api_key="test-not-real", api_url="http://127.0.0.1:9")
+    monkeypatch.setattr(ls, "get_langsmith", lambda: ls.LangSmith(True, "test", unreachable))
+    llm = FakeLLM([calls(tool_use("get_order", {"order_id": 4821})), text("Processing.")])
+
+    result = run_agent(db=db, llm=llm, customer_id=ALICE, message="Status?", config=AgentConfig())
+
+    assert result.status == "completed" and result.final_response == "Processing."
+    assert [c["status"] for c in result.tool_calls] == ["success"]
