@@ -1,26 +1,22 @@
 """Saving evaluated variants and reading them back for metrics."""
 
 import dataclasses
-import json
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.lab_models import (
-    EvaluationCheckRecord,
-    EvaluationResultRecord,
-    ExecutionTraceRecord,
-)
+from app.db.lab_models import EvaluationCheckRecord, EvaluationResultRecord
 from app.evaluation.evaluate import EvaluatedVariant
 from app.evaluation.metrics import TokenTotals, VariantSummary
 from app.evaluation.results import CheckResult, CheckSource, Severity, Verdict
-from app.scenarios.runner import StateSnapshot
+from app.observability.trace_store import build_trace
+from app.observability.trace_store import to_json as _json
+from app.scenarios.runner import ScenarioRun, StateSnapshot, TurnResult
 
-
-def _json(value: Any) -> Any:
-    """Make enums, Decimals and dataclasses JSON-safe for JSONB columns."""
-    return json.loads(json.dumps(value, default=str))
+# Tool and Claude calls are stored as tool_calls rows and trace events instead.
+_TURN_FIELDS_STORED_ELSEWHERE = {"tool_calls", "llm_calls"}
 
 
 def _state(snapshot: StateSnapshot | None) -> dict[str, Any] | None:
@@ -43,8 +39,45 @@ def _failures(checks: list[CheckResult], severity: Severity) -> int:
     )
 
 
+def turn_summary(turn: TurnResult) -> dict[str, Any]:
+    return {
+        k: v for k, v in dataclasses.asdict(turn).items() if k not in _TURN_FIELDS_STORED_ELSEWHERE
+    }
+
+
+def _trace(run: ScenarioRun, test_run_id: int, agent_version: str, model: str) -> Any:
+    last = run.turns[-1] if run.turns else None
+    return build_trace(
+        execution_id=run.execution_id,
+        source="evaluation",
+        customer_id=run.customer_id,
+        model=model,
+        status="error" if run.error or last is None else last.status,
+        escalation_reason=last.escalation_reason if last else None,
+        error=run.error,
+        started_at=run.started_at,
+        finished_at=datetime.now(UTC),
+        turns=[turn_summary(t) for t in run.turns],
+        messages=run.messages,
+        tool_calls=run.tool_calls,
+        events=run.events,
+        agent_version=agent_version,
+        test_run_id=test_run_id,
+        scenario_id=run.scenario_id,
+        variant_id=run.variant_id,
+        initial_state=_state(run.initial_state),
+        final_state=_state(run.final_state),
+        injected_faults=_json([dataclasses.asdict(f) for f in run.injected_faults]),
+    )
+
+
 def save_result(
-    db: Session, test_run_id: int, evaluated: EvaluatedVariant
+    db: Session,
+    test_run_id: int,
+    evaluated: EvaluatedVariant,
+    *,
+    agent_version: str = "default",
+    model: str = "",
 ) -> EvaluationResultRecord:
     run, summary, judge = evaluated.run, evaluated.summary, evaluated.judge_result
     last = run.turns[-1] if run.turns else None
@@ -93,13 +126,7 @@ def save_result(
             )
             for c in evaluated.checks
         ],
-        trace=ExecutionTraceRecord(
-            turns=_json([dataclasses.asdict(t) for t in run.turns]),
-            messages=_json(run.messages),
-            initial_state=_state(run.initial_state),
-            final_state=_state(run.final_state),
-            injected_faults=_json([dataclasses.asdict(f) for f in run.injected_faults]),
-        ),
+        trace=_trace(run, test_run_id, agent_version, model),
     )
     db.add(record)
     return record

@@ -75,6 +75,7 @@ class TestRunRecord(Base):
     # Snapshot computed from evaluation_results when the run finishes.
     metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[str | None] = mapped_column(String(64))  # the request that started it
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -92,6 +93,7 @@ class EvaluationResultRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     test_run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id"), index=True)
+    execution_trace_id: Mapped[int] = mapped_column(ForeignKey("execution_traces.id"), unique=True)
     scenario_id: Mapped[str] = mapped_column(ForeignKey("test_scenarios.id"), index=True)
     variant_id: Mapped[str] = mapped_column(ForeignKey("scenario_variants.id"))
     persona: Mapped[str] = mapped_column(String(20))
@@ -127,7 +129,7 @@ class EvaluationResultRecord(Base):
     checks: Mapped[list["EvaluationCheckRecord"]] = relationship(
         back_populates="result", order_by="EvaluationCheckRecord.id"
     )
-    trace: Mapped["ExecutionTraceRecord | None"] = relationship(back_populates="result")
+    trace: Mapped["ExecutionTraceRecord"] = relationship(back_populates="result")
 
 
 class EvaluationCheckRecord(Base):
@@ -152,19 +154,94 @@ class EvaluationCheckRecord(Base):
 
 
 class ExecutionTraceRecord(Base):
-    """What happened in one variant run: turns, tool and Claude calls, state before and
-    after, and injected faults. Phase 6 adds per-step trace events."""
+    """One agent execution (a live chat or a scenario variant) and everything it did.
+
+    `execution_id` is the public correlation key: it appears in logs, LangSmith metadata
+    and API responses, and in Phase 7 becomes the LangGraph thread id.
+    """
 
     __tablename__ = "execution_traces"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    evaluation_result_id: Mapped[int] = mapped_column(
-        ForeignKey("evaluation_results.id"), unique=True
-    )
+    execution_id: Mapped[str] = mapped_column(String(32), unique=True)
+    source: Mapped[str] = mapped_column(String(20))  # api | evaluation
+    request_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    test_run_id: Mapped[int | None] = mapped_column(ForeignKey("test_runs.id"), index=True)
+    scenario_id: Mapped[str | None] = mapped_column(String(80))
+    variant_id: Mapped[str | None] = mapped_column(String(120))
+    customer_id: Mapped[int]
+    agent_version: Mapped[str | None] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20))  # completed | escalated | error
+    escalation_reason: Mapped[str | None] = mapped_column(String(40))
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Per-turn summary and the conversation; tool and Claude calls live in their own rows.
     turns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    # Scenario runs only.
     initial_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     final_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    injected_faults: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    injected_faults: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
 
-    result: Mapped[EvaluationResultRecord] = relationship(back_populates="trace")
+    result: Mapped[EvaluationResultRecord | None] = relationship(back_populates="trace")
+    events: Mapped[list["TraceEventRecord"]] = relationship(
+        back_populates="trace", order_by="TraceEventRecord.sequence"
+    )
+    tool_calls: Mapped[list["ToolCallRow"]] = relationship(
+        back_populates="trace", order_by="ToolCallRow.sequence"
+    )
+
+
+class TraceEventRecord(Base):
+    """One step of an execution: a span (started_at + duration) or a point event."""
+
+    __tablename__ = "trace_events"
+    __table_args__ = (UniqueConstraint("execution_trace_id", "sequence"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    execution_trace_id: Mapped[int] = mapped_column(ForeignKey("execution_traces.id"), index=True)
+    sequence: Mapped[int]
+    turn: Mapped[int]
+    type: Mapped[str] = mapped_column(String(30), index=True)
+    node: Mapped[str | None] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(10))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[float | None]
+    tool_name: Mapped[str | None] = mapped_column(String(50))
+    attempt: Mapped[int | None]
+    model: Mapped[str | None] = mapped_column(String(50))
+    input_tokens: Mapped[int | None]
+    output_tokens: Mapped[int | None]
+    cache_creation_input_tokens: Mapped[int | None]
+    cache_read_input_tokens: Mapped[int | None]
+    error_type: Mapped[str | None] = mapped_column(String(80))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    trace: Mapped[ExecutionTraceRecord] = relationship(back_populates="events")
+
+
+class ToolCallRow(Base):
+    """One tool invocation, normalized for SQL analysis (named to avoid clashing with the
+    agent's in-memory ToolCallRecord)."""
+
+    __tablename__ = "tool_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    execution_trace_id: Mapped[int] = mapped_column(ForeignKey("execution_traces.id"), index=True)
+    sequence: Mapped[int]  # order within the execution
+    turn: Mapped[int]
+    tool_use_id: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(50), index=True)
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(10), index=True)  # success | rejected | error
+    error: Mapped[str | None] = mapped_column(String(50))
+    attempts: Mapped[int]
+    latency_ms: Mapped[float]
+    output: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    # Unknown for calls migrated from before tracing existed.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    trace: Mapped[ExecutionTraceRecord] = relationship(back_populates="tool_calls")

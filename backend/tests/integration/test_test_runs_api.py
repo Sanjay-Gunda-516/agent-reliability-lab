@@ -85,7 +85,8 @@ def test_result_detail_explains_the_failure(api: TestClient) -> None:
     assert forbidden["actual"][0]["input"] == {"order_id": 8821}
     assert detail["judge_verdict"] == "pass"  # reported separately; the verdict stays fail
     assert detail["trace"]["final_state"]["orders"]["8821"] == "shipped"
-    assert detail["trace"]["turns"][0]["tool_calls"][0]["status"] == "rejected"
+    assert len(detail["trace"]["execution_id"]) == 32
+    assert "tool_calls" not in detail["trace"]["turns"][0]  # stored as tool_calls rows now
 
 
 def test_failed_checks_endpoint(api: TestClient) -> None:

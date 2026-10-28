@@ -94,6 +94,7 @@ class CheckView(BaseModel):
 class TraceView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    execution_id: str
     turns: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     initial_state: dict[str, Any] | None

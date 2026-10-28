@@ -16,7 +16,7 @@ from app.evaluation.evaluate import EvaluatedVariant, evaluate_variant
 from app.evaluation.judge import Judge
 from app.evaluation.metrics import compute_metrics
 from app.evaluation.store import load_summaries, save_result
-from app.observability.context import correlate
+from app.observability.context import correlate, current
 from app.scenarios.loader import load_scenarios
 from app.scenarios.runner import run_scenario, select_variants
 from app.scenarios.schema import Persona, Scenario, Tag, variant_id
@@ -81,6 +81,7 @@ def create_test_run(
 
     run = TestRunRecord(
         status="queued",
+        request_id=current().request_id,
         agent_version=agent_version,
         agent_config=dataclasses.asdict(config),
         judge_model=judge_model,
@@ -122,7 +123,9 @@ def execute_test_run(
                     scenario, persona, llm=llm, config=config, engine=engine
                 )
                 evaluated = evaluate_variant(scenario, scenario_run, judge)
-                save_result(db, run.id, evaluated)
+                save_result(
+                    db, run.id, evaluated, agent_version=run.agent_version, model=config.model
+                )
                 db.commit()  # keep finished variants even if a later one fails
                 if on_result:
                     on_result(evaluated)
