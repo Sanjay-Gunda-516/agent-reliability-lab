@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,12 +31,20 @@ def run_agent(
     message: str,
     history: list[dict[str, Any]] | None = None,
     config: AgentConfig | None = None,
+    before_tool_call: Callable[[str], None] | None = None,
 ) -> AgentRunResult:
     config = config or AgentConfig()
     started = time.perf_counter()
+    context = AgentContext(
+        db=db,
+        llm=llm,
+        customer_id=customer_id,
+        config=config,
+        before_tool_call=before_tool_call,
+    )
     state = get_agent_graph().invoke(
         {"messages": [*(history or []), {"role": "user", "content": message}]},
-        context=AgentContext(db=db, llm=llm, customer_id=customer_id, config=config),
+        context=context,
         # LangGraph's own cap on node executions, a backstop behind max_agent_turns.
         config={"recursion_limit": 2 * config.max_agent_turns + 5},
     )

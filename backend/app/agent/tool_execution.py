@@ -41,9 +41,12 @@ def _run_with_retries(
     tool_ctx: ToolContext,
     config: AgentConfig,
     sleep: Callable[[float], None],
+    before_call: Callable[[str], None] | None,
 ) -> tuple[BaseModel, int]:
     for attempt in range(1, config.tool_max_attempts + 1):
         try:
+            if before_call:
+                before_call(spec.name)
             return spec.handler(db, tool_ctx, args), attempt
         except RETRYABLE_ERRORS:
             db.rollback()
@@ -68,7 +71,9 @@ def execute_tool_call(
     config: AgentConfig,
     previous_calls: list[ToolCallRecord],
     sleep: Callable[[float], None] = time.sleep,
+    before_call: Callable[[str], None] | None = None,
 ) -> ToolExecution:
+    """`before_call` runs before every attempt; scenarios use it to inject failures."""
     name: str = call["name"]
     tool_input: dict[str, Any] = call.get("input") or {}
     started = time.perf_counter()
@@ -124,7 +129,13 @@ def execute_tool_call(
 
     try:
         result, attempts = _run_with_retries(
-            spec, args, db=db, tool_ctx=tool_ctx, config=config, sleep=sleep
+            spec,
+            args,
+            db=db,
+            tool_ctx=tool_ctx,
+            config=config,
+            sleep=sleep,
+            before_call=before_call,
         )
     except RETRYABLE_ERRORS:
         return finish(

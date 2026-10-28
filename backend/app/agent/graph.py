@@ -57,6 +57,7 @@ class AgentContext:
     customer_id: int  # from the authenticated session, never from model output
     config: AgentConfig = field(default_factory=AgentConfig)
     sleep: Callable[[float], None] = time.sleep
+    before_tool_call: Callable[[str], None] | None = None
 
 
 def _call_record(
@@ -182,6 +183,7 @@ def run_tools(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             config=ctx.config,
             previous_calls=previous,
             sleep=ctx.sleep,
+            before_call=ctx.before_tool_call,
         )
         records.append(execution.record)
         previous.append(execution.record)
@@ -210,17 +212,14 @@ def finalize(state: AgentState) -> dict[str, Any]:
 
 def escalate(state: AgentState) -> dict[str, Any]:
     reason = state.get("escalation_reason")
-    update: dict[str, Any] = {
-        "status": "escalated",
-        "final_response": ESCALATION_MESSAGES.get(reason, HANDOFF_MESSAGE)
-        if reason
-        else HANDOFF_MESSAGE,
-    }
+    handoff = ESCALATION_MESSAGES.get(reason, HANDOFF_MESSAGE) if reason else HANDOFF_MESSAGE
+    new_messages: list[dict[str, Any]] = []
+
     # Close out tool calls we didn't run so the history stays valid for a later turn.
     last = state["messages"][-1]
     unresolved = _tool_uses(last["content"]) if last["role"] == "assistant" else []
     if unresolved:
-        update["messages"] = [
+        new_messages.append(
             {
                 "role": "user",
                 "content": [
@@ -233,8 +232,10 @@ def escalate(state: AgentState) -> dict[str, Any]:
                     for call in unresolved
                 ],
             }
-        ]
-    return update
+        )
+    # Record what the customer was told, so a follow-up turn has the full picture.
+    new_messages.append({"role": "assistant", "content": [{"type": "text", "text": handoff}]})
+    return {"status": "escalated", "final_response": handoff, "messages": new_messages}
 
 
 def route_after_agent(state: AgentState) -> Literal["run_tools", "finalize", "escalate"]:

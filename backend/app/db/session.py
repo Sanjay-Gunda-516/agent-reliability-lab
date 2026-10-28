@@ -14,7 +14,9 @@ def get_engine() -> Engine:
     return create_engine(
         get_settings().database_url,
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 5},
+        # A stuck query fails fast (as a retryable OperationalError) instead of
+        # holding up an agent turn.
+        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=5000"},
     )
 
 

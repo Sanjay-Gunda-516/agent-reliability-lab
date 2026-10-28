@@ -218,7 +218,9 @@ class TestFailures:
         result = run(db, llm, "something the model declines")
 
         assert result.escalation_reason == EscalationReason.MODEL_REFUSAL
-        assert [m["role"] for m in result.messages] == ["user"]
+        # The refused reply is dropped; only the handoff is recorded.
+        assert [m["role"] for m in result.messages] == ["user", "assistant"]
+        assert result.messages[-1]["content"][0]["text"] == result.final_response
 
     def test_transient_database_errors_are_retried(
         self, db: Session, monkeypatch: pytest.MonkeyPatch
@@ -276,6 +278,43 @@ class TestFailures:
 
         assert result.tool_calls[0]["error"] == "internal_error"
         assert result.status == "completed"
+
+
+def test_before_tool_call_hook_runs_before_each_attempt(db: Session) -> None:
+    seen: list[str] = []
+
+    def hook(tool_name: str) -> None:
+        seen.append(tool_name)
+        if len(seen) == 1:
+            raise TimeoutError("simulated")
+
+    llm = FakeLLM([calls(tool_use("get_order", {"order_id": 4821})), text("Processing.")])
+
+    result = run_agent(
+        db=db, llm=llm, customer_id=ALICE, message="Status?", config=FAST, before_tool_call=hook
+    )
+
+    assert seen == ["get_order", "get_order"]
+    assert result.tool_calls[0]["attempts"] == 2
+
+
+def test_follow_up_turn_after_escalation_has_valid_history(db: Session) -> None:
+    first = run(db, FakeLLM([LLMError("down", transient=True)]), "Cancel #4821")
+    llm = FakeLLM([text("Sorry about that, how can I help now?")])
+
+    second = run_agent(
+        db=db,
+        llm=llm,
+        customer_id=ALICE,
+        message="Are you back?",
+        history=first.messages,
+        config=FAST,
+    )
+
+    sent = llm.requests[0]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert sent[1]["content"][0]["text"] == first.final_response
+    assert second.status == "completed"
 
 
 def test_high_value_refund_escalates_for_approval(db: Session) -> None:

@@ -80,7 +80,22 @@ class TestTerminalNodes:
         result = escalate(current)
 
         assert result["status"] == "escalated"
-        [closing] = result["messages"]
+        closing, handoff = result["messages"]
         assert closing["role"] == "user"
         assert closing["content"][0]["tool_use_id"] == "toolu_1"
         assert closing["content"][0]["is_error"] is True
+        assert handoff == {
+            "role": "assistant",
+            "content": [{"type": "text", "text": result["final_response"]}],
+        }
+
+    def test_escalate_records_the_handoff_in_history(self) -> None:
+        current = state(
+            messages=[{"role": "user", "content": "hi"}],
+            escalation_reason=EscalationReason.LLM_UNAVAILABLE,
+        )
+
+        [handoff] = escalate(current)["messages"]
+
+        assert handoff["role"] == "assistant"
+        assert "support team" in handoff["content"][0]["text"]
