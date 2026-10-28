@@ -18,7 +18,7 @@ from app.evaluation.metrics import compute_metrics
 from app.evaluation.store import load_summaries, save_result
 from app.scenarios.loader import load_scenarios
 from app.scenarios.runner import run_scenario, select_variants
-from app.scenarios.schema import Persona, Scenario, Tag
+from app.scenarios.schema import Persona, Scenario, Tag, variant_id
 from app.scenarios.sync import sync_scenarios
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,9 @@ class RunSelection(BaseModel):
     """Which variants to run. Empty filters mean 'all'."""
 
     scenario_ids: list[str] = Field(default_factory=list)
+    variant_ids: list[str] = Field(
+        default_factory=list, description="e.g. 'cancel-eligible-order:normal'"
+    )
     tags: list[Tag] = Field(default_factory=list)
     personas: list[Persona] = Field(default_factory=list)
 
@@ -40,12 +43,19 @@ def _cases(scenarios: list[Scenario], selection: RunSelection) -> list[tuple[Sce
     unknown = set(selection.scenario_ids) - {s.id for s in scenarios}
     if unknown:
         raise SelectionError(f"unknown scenario id(s): {sorted(unknown)}")
-    return select_variants(
+    known_variants = {variant_id(s.id, p) for s in scenarios for p in s.variants}
+    unknown = set(selection.variant_ids) - known_variants
+    if unknown:
+        raise SelectionError(f"unknown variant id(s): {sorted(unknown)}")
+    cases = select_variants(
         scenarios,
         scenario_ids=set(selection.scenario_ids) or None,
         tags=set(selection.tags) or None,
         personas=set(selection.personas) or None,
     )
+    if selection.variant_ids:
+        cases = [(s, p) for s, p in cases if variant_id(s.id, p) in selection.variant_ids]
+    return cases
 
 
 def preview_cases(selection: RunSelection) -> list[tuple[Scenario, Persona]]:

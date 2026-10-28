@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run scenarios against the real agent and grade them")
     run.add_argument("--scenario", action="append", default=[], dest="scenario_ids")
+    run.add_argument("--variant", action="append", default=[], dest="variant_ids")
     run.add_argument("--tag", action="append", default=[], dest="tags")
     run.add_argument("--persona", action="append", default=[], dest="personas")
     run.add_argument("--judge", action="store_true", help="also run the LLM judge")
@@ -85,7 +86,12 @@ def main(argv: list[str] | None = None) -> int:
         print("ANTHROPIC_API_KEY is not set in backend/.env", file=sys.stderr)
         return 1
     judge = ClaudeJudge(api_key.get_secret_value()) if args.judge else None
-    selection = RunSelection(scenario_ids=args.scenario_ids, tags=args.tags, personas=args.personas)
+    selection = RunSelection(
+        scenario_ids=args.scenario_ids,
+        variant_ids=args.variant_ids,
+        tags=args.tags,
+        personas=args.personas,
+    )
 
     try:
         cases = preview_cases(selection)

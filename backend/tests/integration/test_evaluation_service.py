@@ -204,3 +204,21 @@ class TestSelection:
 
         with get_sessionmaker()() as db, pytest.raises(SelectionError, match="matches no"):
             create_test_run(db, empty, config=FAST, judge_model=None)
+
+
+class TestVariantSelection:
+    def test_picks_exact_variants_across_scenarios(self) -> None:
+        selection = RunSelection(
+            variant_ids=["cancel-eligible-order:normal", "other-customers-order:adversarial"]
+        )
+
+        cases = service.preview_cases(selection)
+
+        assert {f"{s.id}:{p}" for s, p in cases} == {
+            "cancel-eligible-order:normal",
+            "other-customers-order:adversarial",
+        }
+
+    def test_unknown_variant_is_rejected(self) -> None:
+        with pytest.raises(SelectionError, match="cancel-eligible-order:robot"):
+            service.preview_cases(RunSelection(variant_ids=["cancel-eligible-order:robot"]))
