@@ -1,5 +1,6 @@
 """Pause and resume around a high-risk action, at the graph/service level."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -7,7 +8,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.agent import approvals
+from app.agent.checkpoints import thread_config
 from app.agent.config import AgentConfig
+from app.agent.graph import APPROVED_REVIEW_NOTE, get_agent_graph
 from app.agent.service import (
     AgentRunResult,
     ExecutionPaused,
@@ -91,6 +94,16 @@ class TestPause:
             EventType.RESPONSE_FINALIZED,
         ]
 
+    def test_checkpoint_holds_no_app_types(self, db: Session) -> None:
+        # LangGraph will refuse to load unregistered classes from checkpoints.
+        recorder = TraceRecorder()
+        pause(db, recorder)
+
+        state = get_agent_graph().get_state(thread_config(recorder.execution_id)).values
+
+        [call] = state["tool_calls"]
+        assert type(call["error"]) is str and call["error"] == "approval_required"
+
     def test_a_new_message_is_refused_while_paused(self, db: Session) -> None:
         recorder = TraceRecorder()
         pause(db, recorder)
@@ -119,7 +132,10 @@ class TestDecision:
         assert approval.action_result["order_id"] == 7420 and approval.resumed_at is not None
         # Claude sees the real outcome as the result of the call it made before the pause.
         [result_block] = last_tool_results(llm.requests[0])
-        assert '"status":"requested"' in result_block["content"].replace(" ", "")
+        outcome = json.loads(result_block["content"])
+        assert outcome["status"] == "requested" and outcome["return_id"]
+        # ...and is told the review is over, so it doesn't say it's still pending.
+        assert outcome["review"] == APPROVED_REVIEW_NOTE
         types = [e.type for e in recorder.events]
         resumed = types.index(EventType.EXECUTION_RESUMED)
         assert types[resumed:] == [
@@ -143,6 +159,7 @@ class TestDecision:
         [result_block] = last_tool_results(llm.requests[0])
         assert "rejected_by_reviewer" in result_block["content"]
         assert "Outside warranty terms" in result_block["content"]
+        assert "review" not in json.loads(result_block["content"])
         decision = next(e for e in recorder.events if e.type == EventType.APPROVAL_DECISION)
         assert decision.attributes["decision"] == "rejected"
         approval = db.get(HumanApprovalRecord, paused.approval_id)
@@ -163,7 +180,8 @@ class TestDecision:
 
         assert result.tool_calls == [] and returns_for_7420(db) == 0
         [result_block] = last_tool_results(llm.requests[0])
-        assert '"return_id": 99' in result_block["content"]
+        outcome = json.loads(result_block["content"])
+        assert outcome["return_id"] == 99 and outcome["review"] == APPROVED_REVIEW_NOTE
 
     def test_resuming_before_a_decision_fails_without_executing(self, db: Session) -> None:
         recorder = TraceRecorder()

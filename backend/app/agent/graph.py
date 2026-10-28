@@ -45,6 +45,10 @@ HANDOFF_MESSAGE = (
     "I wasn't able to finish this request on my own, so I've passed it to our support team. "
     "Someone will follow up with you shortly."
 )
+APPROVED_REVIEW_NOTE = (
+    "A member of the support team reviewed and approved this request, so it has now been "
+    "carried out. It is no longer waiting for review."
+)
 PENDING_APPROVAL_MESSAGE = (
     "This refund needs to be reviewed by a member of our support team before it can be "
     "processed. I've sent it for review and you'll get an update as soon as it's decided."
@@ -345,6 +349,14 @@ def apply_decision(state: AgentState, runtime: Runtime[AgentContext]) -> dict[st
         }
     else:
         raise RuntimeError(f"approval {approval.id} resumed while still {approval.status}")
+
+    if approval.status == approvals.APPROVED and not result_block.get("is_error"):
+        # Without this, Claude only sees a normal result and may still tell the customer
+        # the request is waiting for review.
+        outcome = json.loads(result_block["content"])
+        if isinstance(outcome, dict) and outcome.get("ok") is not False:
+            outcome["review"] = APPROVED_REVIEW_NOTE
+            result_block = {**result_block, "content": json.dumps(outcome, default=str)}
 
     pending = state.get("pending_tool_results") or []
     results = [result_block if b["tool_use_id"] == tool_use_id else b for b in pending]
