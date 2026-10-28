@@ -15,6 +15,7 @@ from app.agent.service import AgentRunResult, run_agent
 from app.agent.state import EscalationReason, Intent, IntentResult
 from app.db.models import Order, Return
 from app.domain.enums import OrderStatus
+from app.observability.tracing import TraceRecorder
 from app.seed import ALICE, reset_demo_data
 from tests.fakes import FakeLLM, calls, reply, text, tool_use
 
@@ -298,23 +299,24 @@ def test_before_tool_call_hook_runs_before_each_attempt(db: Session) -> None:
     assert result.tool_calls[0]["attempts"] == 2
 
 
-def test_follow_up_turn_after_escalation_has_valid_history(db: Session) -> None:
-    first = run(db, FakeLLM([LLMError("down", transient=True)]), "Cancel #4821")
+def test_follow_up_turn_continues_from_the_checkpoint(db: Session) -> None:
+    recorder = TraceRecorder()  # same execution_id for both turns = same LangGraph thread
+    first = run_agent(
+        db=db, llm=FakeLLM([LLMError("down", transient=True)]), customer_id=ALICE,
+        message="Cancel #4821", config=FAST, recorder=recorder,
+    )  # fmt: skip
     llm = FakeLLM([text("Sorry about that, how can I help now?")])
 
     second = run_agent(
-        db=db,
-        llm=llm,
-        customer_id=ALICE,
-        message="Are you back?",
-        history=first.messages,
-        config=FAST,
+        db=db, llm=llm, customer_id=ALICE, message="Are you back?", config=FAST, recorder=recorder
     )
 
     sent = llm.requests[0]
     assert [m["role"] for m in sent] == ["user", "assistant", "user"]
     assert sent[1]["content"][0]["text"] == first.final_response
     assert second.status == "completed"
+    assert second.escalation_reason is None  # per-turn fields reset
+    assert [c["purpose"] for c in second.llm_calls] == ["intent", "agent"]  # this turn only
 
 
 def test_high_value_refund_escalates_for_approval(db: Session) -> None:

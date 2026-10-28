@@ -162,3 +162,13 @@ def test_select_variants_filters() -> None:
     assert all(Tag.ADVERSARIAL in s.tags for s, _ in adversarial)
     assert {p for _, p in angry} == {Persona.ANGRY}
     assert [p for _, p in one] == [Persona.NORMAL, Persona.ANGRY, Persona.CONFUSED]
+
+
+def test_scenario_runs_leave_no_checkpoint_behind() -> None:
+    from app.agent.checkpoints import get_checkpointer, thread_config
+
+    llm = FakeLLM([calls(tool_use("cancel_order", {"order_id": 4821})), text("Cancelled.")])
+    run = run_scenario(scenario("cancel-eligible-order"), Persona.NORMAL, llm=llm, config=FAST)
+
+    assert run.execution_id
+    assert get_checkpointer().get_tuple(thread_config(run.execution_id)) is None

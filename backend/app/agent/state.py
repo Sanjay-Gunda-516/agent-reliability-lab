@@ -69,3 +69,7 @@ class AgentState(TypedDict, total=False):
     status: Literal["completed", "escalated"] | None
     escalation_reason: EscalationReason | None
     final_response: str | None
+    # State persists across turns (checkpointer), so call lists keep growing; these mark
+    # where the current turn starts for per-turn limits and results.
+    turn_start_llm: int
+    turn_start_tool: int

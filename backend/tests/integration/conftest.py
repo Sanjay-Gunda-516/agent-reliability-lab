@@ -6,11 +6,15 @@ from alembic.config import Config
 from sqlalchemy import URL, create_engine, make_url, text
 from sqlalchemy.orm import Session
 
+from app.agent.checkpoints import close_checkpointer, get_checkpointer
 from app.config import BACKEND_DIR, get_settings
 from app.db.session import get_engine, get_sessionmaker
 
 
 def reset_cached_db_objects() -> None:
+    # The checkpointer and the compiled graph hold connections to whichever database
+    # was configured when they were created.
+    close_checkpointer()
     get_settings.cache_clear()
     get_engine.cache_clear()
     get_sessionmaker.cache_clear()
@@ -41,6 +45,7 @@ def test_database(alembic_config: Config) -> Iterator[URL]:
         mp.setenv("DATABASE_URL", test_url.render_as_string(hide_password=False))
         reset_cached_db_objects()
         command.upgrade(alembic_config, "head")
+        get_checkpointer()  # create LangGraph's tables now, before any test holds a transaction
         yield test_url
         get_engine().dispose()
 

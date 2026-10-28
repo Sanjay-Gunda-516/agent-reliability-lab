@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from sqlalchemy.orm import Session
 
+from app.agent.checkpoints import get_checkpointer
 from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient, LLMError, LLMUsage
 from app.agent.prompts import SYSTEM_PROMPTS
@@ -142,7 +144,8 @@ def _failed_call(
 
 def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
-    turns = sum(1 for call in state.get("llm_calls", []) if call["purpose"] == "agent")
+    this_turn = state.get("llm_calls", [])[state.get("turn_start_llm", 0) :]
+    turns = sum(1 for call in this_turn if call["purpose"] == "agent")
     if turns >= ctx.config.max_agent_turns:
         return {"escalation_reason": EscalationReason.STEP_LIMIT}
 
@@ -180,6 +183,7 @@ def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         "llm_calls": [record],
     }
     pending = _tool_uses(response.content)
+    tools_this_turn = len(state.get("tool_calls", [])) - state.get("turn_start_tool", 0)
     for block in pending:
         ctx.recorder.point(
             EventType.TOOL_SELECTED,
@@ -187,7 +191,7 @@ def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
             tool_name=block["name"],
             attributes={"tool_use_id": block["id"]},
         )
-    if pending and len(state.get("tool_calls", [])) + len(pending) > ctx.config.max_tool_calls:
+    if pending and tools_this_turn + len(pending) > ctx.config.max_tool_calls:
         update["escalation_reason"] = EscalationReason.TOOL_CALL_LIMIT
     return update
 
@@ -195,7 +199,10 @@ def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
 def run_tools(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
     tool_ctx = ToolContext(customer_id=ctx.customer_id)
-    previous: list[ToolCallRecord] = list(state.get("tool_calls", []))
+    # Repeats are judged within the turn; asking again in a later turn is legitimate.
+    previous: list[ToolCallRecord] = list(
+        state.get("tool_calls", [])[state.get("turn_start_tool", 0) :]
+    )
     records: list[ToolCallRecord] = []
     result_blocks: list[dict[str, Any]] = []
 
@@ -275,7 +282,9 @@ def route_after_tools(state: AgentState) -> Literal["agent", "escalate"]:
     return "escalate" if state.get("escalation_reason") else "agent"
 
 
-def build_agent_graph() -> CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]:
+def build_agent_graph(
+    checkpointer: BaseCheckpointSaver[str] | None = None,
+) -> CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]:
     graph = StateGraph(AgentState, context_schema=AgentContext)
     graph.add_node("understand_intent", understand_intent)
     graph.add_node("agent", agent)
@@ -289,9 +298,17 @@ def build_agent_graph() -> CompiledStateGraph[AgentState, AgentContext, AgentSta
     graph.add_conditional_edges("run_tools", route_after_tools, ["agent", "escalate"])
     graph.add_edge("finalize", END)
     graph.add_edge("escalate", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
-@lru_cache
+@lru_cache(maxsize=4)
+def _compiled(
+    checkpointer: BaseCheckpointSaver[str],
+) -> CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]:
+    return build_agent_graph(checkpointer)
+
+
 def get_agent_graph() -> CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]:
-    return build_agent_graph()
+    # Keyed on the checkpointer, so a reopened checkpointer can't leave a graph holding
+    # a closed connection pool.
+    return _compiled(get_checkpointer())

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from app.agent.checkpoints import get_checkpointer
 from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient
 from app.agent.service import run_agent
@@ -159,7 +160,6 @@ def run_scenario(
                     llm=run_llm,
                     customer_id=scenario.customer_id,
                     message=message,
-                    history=messages,
                     config=config,
                     before_tool_call=before_tool_call,
                     recorder=recorder,
@@ -185,6 +185,8 @@ def run_scenario(
         finally:
             db.close()
             transaction.rollback()
+            # Scenario runs are throwaway, like the store changes rolled back above.
+            get_checkpointer().delete_thread(recorder.execution_id)
 
     return ScenarioRun(
         scenario_id=scenario.id,
