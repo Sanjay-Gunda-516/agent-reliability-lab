@@ -9,11 +9,13 @@ import sys
 from collections import Counter
 
 from app.db.session import get_sessionmaker
+from app.observability.logging import configure_logging
 from app.scenarios.loader import ScenarioLoadError, load_scenarios
 from app.scenarios.sync import sync_scenarios
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     parser = argparse.ArgumentParser(prog="python -m app.scenarios")
     parser.add_argument("command", choices=["check", "sync"])
     args = parser.parse_args(argv)

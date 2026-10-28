@@ -16,6 +16,7 @@ from app.evaluation.evaluate import EvaluatedVariant, evaluate_variant
 from app.evaluation.judge import Judge
 from app.evaluation.metrics import compute_metrics
 from app.evaluation.store import load_summaries, save_result
+from app.observability.context import correlate
 from app.scenarios.loader import load_scenarios
 from app.scenarios.runner import run_scenario, select_variants
 from app.scenarios.schema import Persona, Scenario, Tag, variant_id
@@ -105,7 +106,7 @@ def execute_test_run(
     engine: Engine | None = None,
     on_result: Callable[[EvaluatedVariant], None] | None = None,
 ) -> None:
-    with session_factory() as db:
+    with correlate(test_run_id=test_run_id), session_factory() as db:
         run = db.get(TestRunRecord, test_run_id)
         if run is None:
             raise ValueError(f"test run {test_run_id} not found")

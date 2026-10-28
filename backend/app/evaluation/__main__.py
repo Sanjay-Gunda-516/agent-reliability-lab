@@ -28,6 +28,7 @@ from app.evaluation.service import (
     preview_cases,
 )
 from app.evaluation.store import load_summaries
+from app.observability.logging import configure_logging
 
 
 def _print_result(evaluated: EvaluatedVariant) -> None:
@@ -65,6 +66,7 @@ def _show(run_id: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     parser = argparse.ArgumentParser(prog="python -m app.evaluation")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run scenarios against the real agent and grade them")

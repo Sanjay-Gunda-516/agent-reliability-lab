@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Customer, Order, OrderItem, Return
 from app.db.session import get_sessionmaker
 from app.domain.enums import OrderStatus, ReturnStatus
+from app.observability.logging import configure_logging
 
 ALICE, BEN, CHLOE = 1001, 1002, 1003
 
@@ -108,6 +109,7 @@ def reset_demo_data(db: Session, now: datetime) -> None:
 
 
 def main() -> None:
+    configure_logging()
     with get_sessionmaker()() as db:
         reset_demo_data(db, datetime.now(UTC))
         db.commit()

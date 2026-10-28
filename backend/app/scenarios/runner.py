@@ -23,6 +23,7 @@ from app.agent.state import LLMCallRecord, ToolCallRecord
 from app.db.models import Order, OrderItem, Return
 from app.db.session import get_engine
 from app.domain.enums import OrderStatus, ReturnStatus
+from app.observability.context import correlate
 from app.scenarios.faults import InjectedFault, apply_faults
 from app.scenarios.schema import OrderFixture, Persona, Scenario, Tag, variant_id
 from app.seed import reset_demo_data
@@ -134,7 +135,10 @@ def run_scenario(
     final_state: StateSnapshot | None = None
     error: str | None = None
 
-    with (engine or get_engine()).connect() as connection:
+    with (
+        correlate(scenario_id=scenario.id, variant_id=variant_id(scenario.id, persona)),
+        (engine or get_engine()).connect() as connection,
+    ):
         transaction = connection.begin()
         # Commits made by the agent's tools become savepoints inside this transaction.
         db = Session(bind=connection, join_transaction_mode="create_savepoint")
