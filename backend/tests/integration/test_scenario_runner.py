@@ -56,8 +56,10 @@ def test_runs_a_scenario_and_rolls_everything_back() -> None:
     assert run.variant_id == "cancel-eligible-order:normal"
     assert run.scenario_hash == scenario("cancel-eligible-order").content_hash()
     assert [c["name"] for c in run.tool_calls] == ["cancel_order"]
-    assert run.final_state is not None
+    assert run.initial_state is not None and run.final_state is not None
+    assert run.initial_state.orders[4821] == OrderStatus.PROCESSING
     assert run.final_state.orders[4821] == OrderStatus.CANCELLED
+    assert run.final_state.owners[9001] == 1002
     assert run.turns[0].intent == {"intent": "cancel_order", "order_ids": [4821]}
     assert committed_order_count() == before
 

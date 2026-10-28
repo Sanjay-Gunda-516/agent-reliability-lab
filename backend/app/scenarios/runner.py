@@ -46,6 +46,7 @@ class TurnResult:
 class StateSnapshot:
     orders: dict[int, OrderStatus]
     returns: dict[int, ReturnStatus]  # order id -> status of its return
+    owners: dict[int, int]  # order id -> customer id
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class ScenarioRun:
     latency_ms: float
     turns: list[TurnResult] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    initial_state: StateSnapshot | None = None
     final_state: StateSnapshot | None = None
     injected_faults: list[InjectedFault] = field(default_factory=list)
     error: str | None = None  # the run itself crashed
@@ -107,9 +109,11 @@ def prepare_store(db: Session, scenario: Scenario, now: datetime) -> None:
 
 def snapshot_state(db: Session) -> StateSnapshot:
     db.expire_all()
+    orders = list(db.scalars(select(Order)))
     return StateSnapshot(
-        orders={order.id: order.status for order in db.scalars(select(Order))},
+        orders={order.id: order.status for order in orders},
         returns={ret.order_id: ret.status for ret in db.scalars(select(Return))},
+        owners={order.id: order.customer_id for order in orders},
     )
 
 
@@ -126,6 +130,7 @@ def run_scenario(
     run_llm, before_tool_call, fault_log = apply_faults(scenario.faults, llm)
     turns: list[TurnResult] = []
     messages: list[dict[str, Any]] = []
+    initial_state: StateSnapshot | None = None
     final_state: StateSnapshot | None = None
     error: str | None = None
 
@@ -135,6 +140,7 @@ def run_scenario(
         db = Session(bind=connection, join_transaction_mode="create_savepoint")
         try:
             prepare_store(db, scenario, started_at)
+            initial_state = snapshot_state(db)
             for message in scenario.variants[persona]:
                 result = run_agent(
                     db=db,
@@ -176,6 +182,7 @@ def run_scenario(
         latency_ms=(time.perf_counter() - started) * 1000,
         turns=turns,
         messages=messages,
+        initial_state=initial_state,
         final_state=final_state,
         injected_faults=list(fault_log),
         error=error,
