@@ -222,7 +222,7 @@ def _execute(
             "rejected",
             result.model_dump_json(),
             output=output,
-            error=result.error,
+            error=result.error.value,  # plain str: it goes into the checkpoint
             attempts=attempts,
         )
     return finish("success", result.model_dump_json(), output=output, attempts=attempts)
