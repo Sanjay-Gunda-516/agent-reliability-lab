@@ -60,3 +60,13 @@ Test scenarios for the agent live in `backend/scenarios/*.yaml`. See
 .venv/bin/python -m app.scenarios check  # validate scenario files
 .venv/bin/python -m app.scenarios sync   # load them into the database
 ```
+
+## Evaluations
+
+Scenario runs are graded by deterministic checks, with an optional LLM judge for what
+the customer was told. See [docs/evaluation.md](docs/evaluation.md) for the method.
+
+```bash
+.venv/bin/python -m app.evaluation run --tag happy-path --judge   # paid; asks first
+.venv/bin/python -m app.evaluation show <run-id>
+```
