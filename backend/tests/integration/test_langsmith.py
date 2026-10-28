@@ -10,6 +10,7 @@ import pytest
 from langsmith import Client
 from langsmith.utils import tracing_is_enabled
 from sqlalchemy.orm import Session
+from urllib3.util import Retry
 
 from app.agent.config import AgentConfig
 from app.agent.service import run_agent
@@ -163,7 +164,9 @@ def test_unreachable_langsmith_does_not_affect_the_agent(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A real client pointed at a closed port: sending happens in the background.
-    unreachable = Client(api_key="test-not-real", api_url="http://127.0.0.1:9")
+    unreachable = Client(
+        api_key="test-not-real", api_url="http://127.0.0.1:9", retry_config=Retry(total=0)
+    )
     monkeypatch.setattr(ls, "get_langsmith", lambda: ls.LangSmith(True, "test", unreachable))
     llm = FakeLLM([calls(tool_use("get_order", {"order_id": 4821})), text("Processing.")])
 
@@ -171,3 +174,5 @@ def test_unreachable_langsmith_does_not_affect_the_agent(
 
     assert result.status == "completed" and result.final_response == "Processing."
     assert [c["status"] for c in result.tool_calls] == ["success"]
+    # Let the failed background send finish while this test still owns logging.
+    unreachable.flush()
