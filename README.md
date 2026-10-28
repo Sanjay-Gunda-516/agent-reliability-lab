@@ -61,6 +61,11 @@ Test scenarios for the agent live in `backend/scenarios/*.yaml`. See
 .venv/bin/python -m app.scenarios sync   # load them into the database
 ```
 
+## Observability
+
+Every agent execution is traced (`GET /traces/{execution_id}`), logs carry correlation
+ids, and LangSmith tracing is optional. See [docs/observability.md](docs/observability.md).
+
 ## Evaluations
 
 Scenario runs are graded by deterministic checks, with an optional LLM judge for what
