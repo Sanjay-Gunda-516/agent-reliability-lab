@@ -48,6 +48,11 @@ def _cases(scenarios: list[Scenario], selection: RunSelection) -> list[tuple[Sce
     )
 
 
+def preview_cases(selection: RunSelection) -> list[tuple[Scenario, Persona]]:
+    """The variants a selection would run, from the current scenario files."""
+    return _cases(load_scenarios(), selection)
+
+
 def create_test_run(
     db: Session,
     selection: RunSelection,
