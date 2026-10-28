@@ -1,7 +1,6 @@
 """LangSmith integration with a recording client: nothing here talks to the network."""
 
 import logging
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,13 +37,6 @@ class RecordingClient(Client):
 
     def update_run(self, *args: Any, **kwargs: Any) -> None:
         pass
-
-
-@pytest.fixture(autouse=True)
-def fresh_config() -> Iterator[None]:
-    ls.get_langsmith.cache_clear()
-    yield
-    ls.get_langsmith.cache_clear()
 
 
 def use(monkeypatch: pytest.MonkeyPatch, **settings: Any) -> None:
@@ -176,3 +168,8 @@ def test_unreachable_langsmith_does_not_affect_the_agent(
     assert [c["status"] for c in result.tool_calls] == ["success"]
     # Let the failed background send finish while this test still owns logging.
     unreachable.flush()
+
+
+def test_the_test_suite_itself_never_traces() -> None:
+    # Guards the autouse fixture in tests/conftest.py, even when backend/.env enables it.
+    assert ls.get_langsmith().enabled is False
