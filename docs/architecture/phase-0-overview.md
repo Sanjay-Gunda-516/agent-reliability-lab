@@ -600,21 +600,21 @@ agent-reliability-lab/
 │   │   ├── db/                 # SQLAlchemy models, session, Alembic env
 │   │   └── main.py
 │   ├── alembic/                # migrations
-│   └── tests/
-│       ├── unit/
-│       ├── integration/
-│       └── evaluation/
+│   ├── tests/
+│   │   ├── unit/
+│   │   ├── integration/
+│   │   └── evaluation/
+│   └── .env.example            # backend + local Postgres config (copy to backend/.env)
 ├── frontend/
 │   └── src/
 │       ├── pages/               # Overview, Scenarios, Runs, Results, Traces, Comparison, Approvals
 │       └── api/                 # typed API client
 ├── docker/
-│   ├── backend.Dockerfile
-│   └── docker-compose.yml
+│   └── backend.Dockerfile
+├── docker-compose.yml           # at the root so `docker compose up` works from the repo
 ├── .github/workflows/           # CI: unit/integration tests, eval gate
 ├── docs/
 │   └── architecture/            # this document and future phase notes
-├── .env.example
 ├── .gitignore
 └── README.md
 ```
