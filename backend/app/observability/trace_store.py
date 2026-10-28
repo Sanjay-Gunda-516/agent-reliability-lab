@@ -7,7 +7,7 @@ from typing import Any
 from app.agent.state import ToolCallRecord
 from app.db.lab_models import ExecutionTraceRecord, ToolCallRow, TraceEventRecord
 from app.observability.context import current
-from app.observability.tracing import EventType, TraceEvent
+from app.observability.tracing import EventType, TraceEvent, TraceRecorder
 
 
 def to_json(value: Any) -> Any:
@@ -115,3 +115,42 @@ def build_trace(
         events=event_rows(events),
         tool_calls=tool_call_rows(tool_calls, events),
     )
+
+
+def continue_recorder(trace: ExecutionTraceRecord) -> TraceRecorder:
+    """A recorder that appends to a stored trace, e.g. when a later request resumes it."""
+    return TraceRecorder(
+        trace.execution_id,
+        last_sequence=max((e.sequence for e in trace.events), default=0),
+        turn=max((e.turn for e in trace.events), default=0),
+    )
+
+
+def append_to_trace(
+    trace: ExecutionTraceRecord,
+    *,
+    events: list[TraceEvent],
+    tool_calls: list[ToolCallRecord],
+    messages: list[dict[str, Any]],
+    status: str,
+    escalation_reason: str | None,
+    finished_at: datetime,
+    new_turn: dict[str, Any] | None = None,
+    turn_update: dict[str, Any] | None = None,
+) -> None:
+    """Add what a later request did to an existing trace (a new turn, or a resume)."""
+    trace.events.extend(event_rows(events))
+    rows = tool_call_rows(tool_calls, events)
+    for offset, row in enumerate(rows, len(trace.tool_calls) + 1):
+        row.sequence = offset
+    trace.tool_calls.extend(rows)
+    turns = list(trace.turns)
+    if new_turn is not None:
+        turns.append(new_turn)
+    elif turn_update is not None and turns:
+        turns[-1] = {**turns[-1], **turn_update}
+    trace.turns = to_json(turns)
+    trace.messages = to_json(messages)
+    trace.status = status
+    trace.escalation_reason = escalation_reason
+    trace.finished_at = finished_at

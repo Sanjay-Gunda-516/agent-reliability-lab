@@ -5,16 +5,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.agent.config import AgentConfig
 from app.agent.llm import ClaudeClient, LLMClient
-from app.agent.service import AgentRunResult, run_agent
+from app.agent.service import AgentRunResult, ExecutionPaused, run_agent
 from app.agent.state import EscalationReason, IntentResult, ToolCallRecord
 from app.config import get_settings
+from app.db.lab_models import ExecutionTraceRecord
 from app.db.models import Customer
 from app.db.session import DbSession
 from app.observability.context import current
-from app.observability.trace_store import build_trace
+from app.observability.trace_store import append_to_trace, build_trace, continue_recorder
 from app.observability.tracing import TraceRecorder
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,11 @@ class AgentRunRequest(BaseModel):
     # the auth token, not the request body.
     customer_id: int = Field(gt=0, description="The signed-in customer.")
     message: str = Field(min_length=1, max_length=4000)
+    execution_id: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Continue this conversation instead of starting a new one.",
+    )
 
 
 class UsageSummary(BaseModel):
@@ -47,6 +54,7 @@ class AgentRunResponse(BaseModel):
     tool_calls: list[ToolCallRecord]
     usage: UsageSummary
     latency_ms: float
+    approval_id: int | None = None
 
 
 @lru_cache
@@ -74,17 +82,24 @@ def run(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found.")
 
     config = AgentConfig()
-    recorder = TraceRecorder()
+    trace = _trace_to_continue(db, request) if request.execution_id else None
+    recorder = continue_recorder(trace) if trace else TraceRecorder()
     started_at = datetime.now(UTC)
-    result = run_agent(
-        db=db,
-        llm=llm,
-        customer_id=request.customer_id,
-        message=request.message,
-        config=config,
-        recorder=recorder,
-    )
-    _save_trace(db, request, result, recorder, config, started_at)
+    try:
+        result = run_agent(
+            db=db,
+            llm=llm,
+            customer_id=request.customer_id,
+            message=request.message,
+            config=config,
+            recorder=recorder,
+        )
+    except ExecutionPaused as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This conversation is waiting for a support team decision.",
+        ) from exc
+    _save_trace(db, request, result, recorder, config, started_at, trace)
 
     calls = result.llm_calls
     return AgentRunResponse(
@@ -103,7 +118,21 @@ def run(
             cache_read_input_tokens=sum(c["cache_read_input_tokens"] for c in calls),
         ),
         latency_ms=result.latency_ms,
+        approval_id=result.approval_id,
     )
+
+
+def _trace_to_continue(db: DbSession, request: AgentRunRequest) -> ExecutionTraceRecord:
+    trace = db.scalars(
+        select(ExecutionTraceRecord).where(
+            ExecutionTraceRecord.execution_id == request.execution_id,
+            ExecutionTraceRecord.source == "api",
+        )
+    ).one_or_none()
+    # Someone else's conversation looks the same as one that doesn't exist.
+    if trace is None or trace.customer_id != request.customer_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    return trace
 
 
 def _save_trace(
@@ -113,10 +142,33 @@ def _save_trace(
     recorder: TraceRecorder,
     config: AgentConfig,
     started_at: datetime,
+    existing: ExecutionTraceRecord | None = None,
 ) -> None:
     # The customer's request has already been acted on; a failure to store its trace is
     # logged rather than turned into an error response.
+    turn = {
+        "message": request.message,
+        "status": result.status,
+        "final_response": result.final_response,
+        "escalation_reason": result.escalation_reason,
+        "intent": result.intent,
+        "latency_ms": result.latency_ms,
+        "approval_id": result.approval_id,
+    }
     try:
+        if existing is not None:
+            append_to_trace(
+                existing,
+                events=recorder.events,
+                tool_calls=result.tool_calls,
+                messages=result.messages,
+                status=result.status,
+                escalation_reason=result.escalation_reason,
+                finished_at=datetime.now(UTC),
+                new_turn=turn,
+            )
+            db.commit()
+            return
         db.add(
             build_trace(
                 execution_id=result.execution_id,
@@ -128,16 +180,7 @@ def _save_trace(
                 escalation_reason=result.escalation_reason,
                 started_at=started_at,
                 finished_at=datetime.now(UTC),
-                turns=[
-                    {
-                        "message": request.message,
-                        "status": result.status,
-                        "final_response": result.final_response,
-                        "escalation_reason": result.escalation_reason,
-                        "intent": result.intent,
-                        "latency_ms": result.latency_ms,
-                    }
-                ],
+                turns=[turn],
                 messages=result.messages,
                 tool_calls=result.tool_calls,
                 events=recorder.events,

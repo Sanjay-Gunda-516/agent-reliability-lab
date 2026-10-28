@@ -119,7 +119,7 @@ def run_agent(
     recorder = recorder or TraceRecorder()
     started = time.perf_counter()
     snapshot = get_agent_graph().get_state(thread_config(recorder.execution_id))
-    if snapshot.next:
+    if snapshot.interrupts:
         raise ExecutionPaused(recorder.execution_id)
     previous = snapshot.values
     recorder.start_turn()
@@ -171,7 +171,7 @@ def resume_agent(
     config = config or AgentConfig()
     started = time.perf_counter()
     snapshot = get_agent_graph().get_state(thread_config(recorder.execution_id))
-    if not snapshot.next:
+    if not snapshot.interrupts:
         raise NotPaused(recorder.execution_id)
     previous = snapshot.values
 
