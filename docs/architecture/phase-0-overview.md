@@ -548,6 +548,43 @@ things worth calling out already:
   work, rather than just pausing for the duration of one function call
   (a Phase 7 topic).
 
+### As built in Phase 3
+
+The diagram above is the conceptual flow. The implemented graph
+(`backend/app/agent/graph.py`) keeps its guarantees but lets Claude choose
+the tools through native tool calling instead of hard-coding a
+retrieve → check → act sequence:
+
+```
+START → understand_intent → agent ⇄ run_tools
+                              │         │
+                              ├→ finalize → END
+                              └→ escalate → END   (also reachable from run_tools)
+```
+
+- `understand_intent` — a low-effort structured-output call that labels
+  the turn (`cancel_order`, `order_status`, …) and the order numbers
+  mentioned. It's recorded for intent-accuracy evaluation and the trace;
+  it deliberately doesn't restrict which tools Claude may use, so a
+  misclassified intent can't block a correct action.
+- `agent` — Claude with the seven tools. The order lookup, the eligibility
+  check and the action from the conceptual diagram become tool calls Claude
+  chooses, which is exactly what "tool-selection accuracy" measures.
+- `run_tools` — validates arguments against the same Pydantic models the
+  tool schemas come from, retries infrastructure failures (never business
+  rejections), blocks repeated identical calls, contains unexpected
+  errors, and returns every result for a turn in one message.
+- `finalize` / `escalate` — the two ways a turn ends. Escalation covers
+  the step and tool-call limits, a model refusal, a Claude outage after the
+  SDK's retries, a truncated reply, and refunds that need approval. It
+  closes out any unanswered tool calls so the history stays valid.
+
+Safety doesn't depend on Claude choosing well: eligibility, ownership and
+the approval threshold are enforced inside the tools, and the graph
+enforces the limits. Loop protection is two counters (agent turns and tool
+calls) plus LangGraph's own `recursion_limit` as a backstop, rather than a
+single `step_count`.
+
 ---
 
 ## 13. Evaluation architecture
