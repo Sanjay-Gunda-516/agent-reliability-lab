@@ -78,3 +78,28 @@ class FakeLLM:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class ScriptedByMessage(FakeLLM):
+    """Like FakeLLM, but each conversation gets a fresh copy of the script chosen by a
+    phrase in the customer's first message, so one fake can serve a whole test run."""
+
+    def __init__(self, scripts: dict[str, list[LLMResponse | Exception]]) -> None:
+        super().__init__([])
+        self.scripts = scripts
+
+    def respond(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        config: AgentConfig,
+    ) -> LLMResponse:
+        if len(messages) == 1:  # a new conversation starts
+            first = messages[0]["content"]
+            phrase = next((p for p in self.scripts if p in first), None)
+            if phrase is None:
+                raise AssertionError(f"no script for conversation starting {first!r}")
+            self.responses = list(self.scripts[phrase])
+        return super().respond(system=system, messages=messages, tools=tools, config=config)

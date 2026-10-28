@@ -1,9 +1,20 @@
 """Reliability Lab tables (Part 2). The store tables (Part 1) live in models.py."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, true
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    true,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,3 +56,115 @@ class ScenarioVariantRecord(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     scenario: Mapped[ScenarioRecord] = relationship(back_populates="variants")
+
+
+class TestRunRecord(Base):
+    """One execution of a selection of scenario variants against one agent configuration."""
+
+    __tablename__ = "test_runs"
+    __test__ = False  # not a pytest test class
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(20))  # queued | running | completed | failed
+    # A label until agent versions get their own table (Phase 8).
+    agent_version: Mapped[str] = mapped_column(String(50))
+    agent_config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    judge_model: Mapped[str | None] = mapped_column(String(50))
+    selection: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    variant_count: Mapped[int]
+    # Snapshot computed from evaluation_results when the run finishes.
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    results: Mapped[list["EvaluationResultRecord"]] = relationship(
+        back_populates="test_run", order_by="EvaluationResultRecord.id"
+    )
+
+
+class EvaluationResultRecord(Base):
+    """How one scenario variant scored within a test run."""
+
+    __tablename__ = "evaluation_results"
+    __table_args__ = (UniqueConstraint("test_run_id", "variant_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    test_run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id"), index=True)
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("test_scenarios.id"), index=True)
+    variant_id: Mapped[str] = mapped_column(ForeignKey("scenario_variants.id"))
+    persona: Mapped[str] = mapped_column(String(20))
+    scenario_hash: Mapped[str] = mapped_column(String(64))
+    verdict: Mapped[str] = mapped_column(String(10))  # pass | fail | error
+    critical_failures: Mapped[int]
+    major_failures: Mapped[int]
+    minor_failures: Mapped[int]
+    final_status: Mapped[str | None] = mapped_column(String(20))
+    escalation_reason: Mapped[str | None] = mapped_column(String(40))
+    intent: Mapped[str | None] = mapped_column(String(40))
+    final_response: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    models: Mapped[list[str]] = mapped_column(ARRAY(String(50)))  # can differ after a fallback
+    latency_ms: Mapped[float]
+    llm_calls: Mapped[int]
+    input_tokens: Mapped[int]
+    output_tokens: Mapped[int]
+    cache_creation_input_tokens: Mapped[int]
+    cache_read_input_tokens: Mapped[int]
+    tool_calls: Mapped[int]
+    tool_errors: Mapped[int]
+    estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    judge_model: Mapped[str | None] = mapped_column(String(50))
+    judge_verdict: Mapped[str | None] = mapped_column(String(10))
+    judge_error: Mapped[str | None] = mapped_column(Text)
+    judge_usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    judge_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    test_run: Mapped[TestRunRecord] = relationship(back_populates="results")
+    scenario: Mapped[ScenarioRecord] = relationship()
+    checks: Mapped[list["EvaluationCheckRecord"]] = relationship(
+        back_populates="result", order_by="EvaluationCheckRecord.id"
+    )
+    trace: Mapped["ExecutionTraceRecord | None"] = relationship(back_populates="result")
+
+
+class EvaluationCheckRecord(Base):
+    """One check of one result. A table rather than JSON so failures can be grouped in SQL."""
+
+    __tablename__ = "evaluation_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evaluation_result_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation_results.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(50), index=True)
+    target: Mapped[str | None] = mapped_column(String(200))
+    source: Mapped[str] = mapped_column(String(20))  # deterministic | judge
+    severity: Mapped[str] = mapped_column(String(10))
+    passed: Mapped[bool]
+    reason: Mapped[str] = mapped_column(Text)
+    expected: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    actual: Mapped[Any] = mapped_column(JSONB, nullable=True)
+
+    result: Mapped[EvaluationResultRecord] = relationship(back_populates="checks")
+
+
+class ExecutionTraceRecord(Base):
+    """What happened in one variant run: turns, tool and Claude calls, state before and
+    after, and injected faults. Phase 6 adds per-step trace events."""
+
+    __tablename__ = "execution_traces"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evaluation_result_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation_results.id"), unique=True
+    )
+    turns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    initial_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    final_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    injected_faults: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+
+    result: Mapped[EvaluationResultRecord] = relationship(back_populates="trace")
