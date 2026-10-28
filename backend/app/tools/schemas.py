@@ -26,6 +26,10 @@ class ToolInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class NoInput(ToolInput):
+    pass
+
+
 class OrderLookupInput(ToolInput):
     order_id: int = Field(gt=0, description="The order number, e.g. 4821 for order #4821.")
 

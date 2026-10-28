@@ -10,6 +10,8 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.14",
+    "anthropic>=2.3,<3",
+    "langgraph>=1.2,<2",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +34,11 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "integration: needs a running PostgreSQL (docker compose up -d db)",
+    "live: calls the real Claude API (costs money); run with -m live",
+]
+filterwarnings = [
+    # langsmith (a langgraph dependency) still uses an API deprecated in Python 3.14.
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:langsmith.*",
 ]
 
 [tool.ruff]
