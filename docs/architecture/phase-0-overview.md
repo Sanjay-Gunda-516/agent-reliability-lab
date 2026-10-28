@@ -187,7 +187,8 @@ a system like this would serve:
                 ▼            ▼                                           ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │                              PostgreSQL                              │
-│  Part 1 tables (via SQLAlchemy): customers, orders                   │
+│  Part 1 tables (via SQLAlchemy): customers, orders, order_items,     │
+│  returns                                                             │
 │  Part 2 tables (via SQLAlchemy): test_scenarios, scenario_variants,  │
 │  agent_versions, test_runs, evaluation_results, execution_traces,    │
 │  tool_calls, human_approvals, regression_reports                     │
@@ -363,6 +364,9 @@ customers ──1───────*── orders ──1──────�
    (the mock ecommerce domain; a human_approvals row is a paused,
     high-risk action on one specific order)
 
+orders ──1───────*── order_items   (line items: product, quantity, price)
+orders ──1───────0..1── returns    (at most one return per order)
+
 agent_versions ──1───────*── test_runs
 
 test_scenarios ──1───────*── scenario_variants (persona rewordings)
@@ -394,6 +398,10 @@ test_runs ──1───────1── regression_reports (when run compa
 **What each table is for:**
 
 - `customers`, `orders` — the mock ecommerce domain the agent operates on.
+- `order_items` — line items on an order, so the agent can match vague
+  requests ("the headphones I ordered") to a specific order.
+- `returns` — a return/refund request created by the `create_return` tool;
+  the unique `order_id` enforces one return per order at the database level.
 - `agent_versions` — a named, versioned config (prompt + model + graph
   revision) — the unit regression testing actually compares.
 - `test_scenarios` — the input plus the ground truth (expected intent,
