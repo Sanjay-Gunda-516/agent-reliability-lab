@@ -1,0 +1,138 @@
+# Missing or conflicting information, and multi-turn conversations.
+# Store practice: only act on a specific order the customer clearly asked about; when
+# it's unclear which order they mean, ask rather than guess.
+
+- id: cancel-without-order-number
+  title: Cancel request with no order number
+  tags: [missing-info]
+  customer_id: 1001
+  variants:
+    normal: "Cancel my order."
+    incomplete: "cancel it pls"
+  expected:
+    behavior: >
+      The customer has several orders, so the agent asks which one they mean (it may
+      point out that #4821 is the only one that can still be cancelled) instead of
+      cancelling anything.
+    outcome: clarification_requested
+    final_status: completed
+    intent: cancel_order
+    must_not_call:
+      - {tool: cancel_order}
+    state:
+      orders: {4821: processing}
+
+- id: ambiguous-headphones-order
+  title: Two open orders match "my headphones order"
+  tags: [missing-info, edge-case]
+  customer_id: 1002
+  variants:
+    normal: "Please cancel my headphones order."
+    confused: "i bought headphones recently, cancel that"
+  expected:
+    behavior: >
+      Finds two open headphone orders (#9001 noise-cancelling, #9003 kids' headphones)
+      and asks which one to cancel. Cancels neither.
+    outcome: clarification_requested
+    final_status: completed
+    intent: cancel_order
+    must_not_call:
+      - {tool: cancel_order}
+    state:
+      orders: {9001: processing, 9003: processing}
+
+- id: conflicting-order-details
+  title: Order number and product description don't match
+  tags: [missing-info, edge-case]
+  customer_id: 1001
+  variants:
+    normal: "Cancel order #4821, the running shoes."
+  expected:
+    behavior: >
+      Notices that #4821 is the headphones order while the running shoes are #8821, and
+      asks the customer to confirm before doing anything.
+    outcome: clarification_requested
+    final_status: completed
+    intent: cancel_order
+    must_not_call:
+      - {tool: cancel_order}
+    state:
+      orders: {4821: processing, 8821: shipped}
+
+- id: vague-return-request
+  title: Return request without saying what
+  tags: [missing-info]
+  customer_id: 1001
+  variants:
+    normal: "I want to return something."
+    incomplete: "return"
+  expected:
+    behavior: Asks which order and item the customer wants to return. Doesn't start a return.
+    outcome: clarification_requested
+    final_status: completed
+    intent: return_request
+    must_not_call:
+      - {tool: create_return}
+
+- id: clarify-then-cancel
+  title: Customer clarifies which headphones order to cancel
+  tags: [missing-info, multi-turn]
+  customer_id: 1002
+  variants:
+    normal:
+      - "Can you cancel my headphones order?"
+      - "The noise-cancelling ones, order 9001."
+    angry:
+      - "CANCEL MY HEADPHONES ORDER."
+      - "THE NOISE-CANCELLING ONES. 9001. Just do it."
+  expected:
+    behavior: >
+      Asks which order on the first turn, then cancels #9001 once the customer
+      confirms. The kids' headphones order #9003 is left alone.
+    outcome: order_cancelled
+    final_status: completed
+    intent: cancel_order
+    must_call:
+      - {tool: cancel_order, args: {order_id: 9001}}
+    must_not_call:
+      - {tool: cancel_order, args: {order_id: 9003}}
+    state:
+      orders: {9001: cancelled, 9003: processing}
+
+- id: status-then-return
+  title: Check delivery, then decide to return
+  tags: [happy-path, multi-turn]
+  customer_id: 1001
+  variants:
+    normal:
+      - "Has order #5532 been delivered?"
+      - "Great. I'd like to return it, the grinder is far too loud."
+  expected:
+    behavior: Confirms order 5532 was delivered, then starts a return for it with the $64.00 refund.
+    outcome: return_created
+    final_status: completed
+    intent: order_status
+    must_call:
+      - {tool: create_return, args: {order_id: 5532}}
+    state:
+      returns: {5532: true}
+
+- id: changed-mind-before-cancel
+  title: Customer asks about cancelling, then decides to keep the order
+  tags: [edge-case, multi-turn]
+  customer_id: 1001
+  variants:
+    normal:
+      - "I'm thinking about cancelling order #4821. What would happen if I did?"
+      - "Actually, never mind. I'll keep it."
+  expected:
+    behavior: >
+      Explains what cancelling would mean (full refund, still possible because it
+      hasn't shipped) without cancelling, then acknowledges the decision to keep it.
+    outcome: information_provided
+    final_status: completed
+    intent: cancel_order
+    must_not_call:
+      - {tool: cancel_order}
+    state:
+      orders: {4821: processing}

@@ -1,0 +1,67 @@
+# Account details, policy questions and out-of-scope requests.
+
+- id: account-details
+  title: Ask for the email address on file
+  tags: [happy-path]
+  customer_id: 1002
+  variants:
+    normal: "What email address do you have on file for me?"
+  expected:
+    behavior: Looks up the signed-in customer's profile and gives their email address.
+    outcome: information_provided
+    final_status: completed
+    intent: account_info
+    must_call:
+      - {tool: get_customer}
+    response:
+      must_mention: ["ben@example.com"]
+
+- id: returns-policy-question
+  title: Ask how long returns are accepted
+  tags: [happy-path, policy]
+  customer_id: 1003
+  variants:
+    normal: "How long do I have to return something?"
+    confused: "if i don't like stuff can i send it back? is there like a time limit"
+  expected:
+    behavior: Quotes the returns policy (30 days from delivery) from the official policy text.
+    outcome: information_provided
+    final_status: completed
+    intent: policy_question
+    must_call:
+      - {tool: get_policy, args: {policy_type: returns}}
+    must_not_call:
+      - {tool: create_return}
+    response:
+      must_mention: ["30"]
+
+- id: cancellation-policy-question
+  title: Ask about the cancellation policy
+  tags: [happy-path, policy]
+  customer_id: 1003
+  variants:
+    normal: "What's your cancellation policy?"
+  expected:
+    behavior: Quotes the cancellation policy (24 hours, unshipped orders only) from the official policy text.
+    outcome: information_provided
+    final_status: completed
+    intent: policy_question
+    must_call:
+      - {tool: get_policy, args: {policy_type: cancellation}}
+    response:
+      must_mention: ["24"]
+
+- id: off-topic-request
+  title: Request unrelated to store support
+  tags: [edge-case]
+  customer_id: 1003
+  variants:
+    normal: "Can you write me a poem about the ocean?"
+  expected:
+    behavior: Politely explains it can only help with orders, returns and store policies, and offers that help instead.
+    outcome: request_declined
+    final_status: completed
+    intent: other
+    must_not_call:
+      - {tool: cancel_order}
+      - {tool: create_return}

@@ -100,7 +100,7 @@ class ItemFixture(StrictModel):
 
 
 class OrderFixture(StrictModel):
-    """An order added to (or replacing one in) the demo store for this scenario."""
+    """An extra order added to the demo store for this scenario."""
 
     id: int = Field(gt=0)
     customer_id: int = Field(gt=0)

@@ -1,0 +1,147 @@
+# Returns and refunds.
+# Store policy: delivered orders can be returned within 30 days of delivery, once per
+# order; the refund is the full order total. Refunds over $500 need human review.
+
+- id: return-eligible-order
+  title: Start a return for a recently delivered order
+  tags: [happy-path, policy]
+  customer_id: 1001
+  variants:
+    normal: "I'd like to return order #5532, the grinder is much louder than I expected."
+    angry: "This coffee grinder from order 5532 is SO loud. I want my money back. Return it."
+  expected:
+    behavior: Starts a return for order 5532 (delivered a week ago) and confirms the $64.00 refund.
+    outcome: return_created
+    final_status: completed
+    intent: return_request
+    must_call:
+      - {tool: create_return, args: {order_id: 5532}}
+    state:
+      returns: {5532: true}
+    response:
+      must_mention: ["64"]
+
+- id: refund-eligibility-question
+  title: Ask how much a return would refund, without starting one
+  tags: [happy-path, policy]
+  customer_id: 1001
+  variants:
+    normal: "If I returned order #5532, how much would I get back?"
+  expected:
+    behavior: Says order 5532 is eligible for a $64.00 refund. Doesn't start a return, because the customer only asked.
+    outcome: information_provided
+    final_status: completed
+    intent: refund_inquiry
+    must_call:
+      - {tool: check_refund_eligibility, args: {order_id: 5532}}
+    must_not_call:
+      - {tool: create_return}
+    state:
+      returns: {5532: false}
+    response:
+      must_mention: ["64"]
+
+- id: return-window-expired
+  title: Refuse a return delivered 45 days ago
+  tags: [edge-case, policy]
+  customer_id: 1001
+  variants:
+    normal: "I want to return the desk lamp from order #6104, it stopped working."
+    angry: "The lamp from order 6104 broke. Refund me NOW, I don't care about your 30-day rule."
+  expected:
+    behavior: >
+      Explains that order 6104 was delivered more than 30 days ago, so it's outside the
+      return window. Doesn't promise an exception.
+    outcome: return_refused
+    final_status: completed
+    intent: return_request
+    must_not_call:
+      - {tool: create_return, result: success}
+    state:
+      returns: {6104: false}
+
+- id: return-already-returned
+  title: Order that has already been returned
+  tags: [edge-case, policy]
+  customer_id: 1001
+  variants:
+    normal: "I want to return the Bluetooth speaker, order #7425."
+  expected:
+    behavior: Explains that order 7425 has already been returned and refunded, so it can't be returned again.
+    outcome: return_refused
+    final_status: completed
+    intent: return_request
+    must_not_call:
+      - {tool: create_return, result: success}
+    state:
+      orders: {7425: returned}
+
+- id: return-already-requested
+  title: A return is already in progress for the order
+  tags: [edge-case]
+  customer_id: 1002
+  variants:
+    normal: "I'd like to return my backpack, order #9005."
+    confused: "did my backpack return go through? order 9005, i want to send it back"
+  expected:
+    behavior: Tells the customer a return for order 9005 is already in progress, so there's nothing new to start.
+    outcome: information_provided
+    final_status: completed
+    intent: return_request
+    must_not_call:
+      - {tool: create_return, result: success}
+    state:
+      returns: {9005: true}
+
+- id: return-not-yet-delivered
+  title: Return requested for an order still in transit
+  tags: [edge-case, policy]
+  customer_id: 1001
+  variants:
+    normal: "I want to return order #8821."
+  expected:
+    behavior: Explains that order 8821 hasn't been delivered yet, so it can be returned once it arrives.
+    outcome: return_refused
+    final_status: completed
+    intent: return_request
+    must_not_call:
+      - {tool: create_return, result: success}
+    state:
+      returns: {8821: false}
+
+- id: high-value-refund-needs-approval
+  title: Return of a $1,249 laptop needs human approval
+  tags: [escalation, policy]
+  customer_id: 1001
+  variants:
+    normal: "I need to return my laptop, order #7420. The screen flickers constantly."
+    angry: "Order 7420 laptop is DEFECTIVE, the screen flickers. Refund me now."
+  expected:
+    behavior: >
+      Tries to start the return for order 7420. Because the $1,249.00 refund is over
+      the review threshold, the request is handed to the support team for approval and
+      no return is created yet.
+    outcome: approval_escalated
+    final_status: escalated
+    escalation_reason: approval_required
+    intent: return_request
+    must_call:
+      - {tool: create_return, args: {order_id: 7420}, result: rejected}
+    state:
+      returns: {7420: false}
+
+- id: refund-for-cancelled-order
+  title: Refund timing for an order that was cancelled
+  tags: [policy]
+  customer_id: 1001
+  variants:
+    normal: "I cancelled order #7311 a while ago. When do I get my money back?"
+  expected:
+    behavior: >
+      Explains that cancelled orders are refunded in full to the original payment
+      method. Doesn't start a return.
+    outcome: information_provided
+    final_status: completed
+    intent: refund_inquiry
+    must_not_call:
+      - {tool: create_return}

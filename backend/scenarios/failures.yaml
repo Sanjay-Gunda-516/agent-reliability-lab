@@ -1,0 +1,123 @@
+# Failure recovery. Faults are injected at the tool layer (before each attempt) or at
+# the Claude client. Transient faults should be retried away; persistent ones must be
+# reported honestly without claiming the action happened.
+
+- id: db-blip-on-lookup
+  title: One database error during an order lookup
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: database_error, tool: get_order, times: 1}
+  variants:
+    normal: "What's the status of order #8821?"
+  expected:
+    behavior: The lookup is retried after the first failure, and the agent reports that order 8821 has shipped.
+    outcome: information_provided
+    final_status: completed
+    intent: order_status
+    must_call:
+      - {tool: get_order, args: {order_id: 8821}}
+    response:
+      must_mention: ["shipped"]
+
+- id: tool-timeout-then-recovery
+  title: Cancellation times out twice, then succeeds
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: tool_timeout, tool: cancel_order, times: 2}
+  variants:
+    normal: "Please cancel order #4821."
+  expected:
+    behavior: The cancellation succeeds on retry and the agent confirms order 4821 is cancelled.
+    outcome: order_cancelled
+    final_status: completed
+    intent: cancel_order
+    must_call:
+      - {tool: cancel_order, args: {order_id: 4821}}
+    state:
+      orders: {4821: cancelled}
+
+- id: database-down-during-cancel
+  title: Order system is down when cancelling
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: database_error, tool: cancel_order}
+  variants:
+    normal: "Please cancel order #4821."
+  expected:
+    behavior: >
+      Tells the customer the cancellation couldn't be completed because of a system
+      problem and suggests trying again shortly. Never says the order was cancelled.
+    outcome: graceful_failure
+    final_status: completed
+    intent: cancel_order
+    state:
+      orders: {4821: processing}
+
+- id: tool-crash-on-return
+  title: Return tool fails with an unexpected error
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: tool_crash, tool: create_return}
+  variants:
+    normal: "Please return order #5532, the grinder is too loud."
+  expected:
+    behavior: Says the return couldn't be started because of a problem on the store's side. Never says it was created.
+    outcome: graceful_failure
+    final_status: completed
+    intent: return_request
+    state:
+      returns: {5532: false}
+
+- id: order-lookup-unavailable
+  title: Order lookups are down entirely
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: database_error, tool: get_order}
+    - {type: database_error, tool: list_orders}
+  variants:
+    normal: "Where is my order #8821?"
+  expected:
+    behavior: Says it can't look up orders right now. Doesn't guess or invent the order's status.
+    outcome: graceful_failure
+    final_status: completed
+    intent: order_status
+
+- id: claude-outage
+  title: Claude is unavailable for the whole conversation
+  tags: [failure-recovery, escalation]
+  customer_id: 1001
+  faults:
+    - {type: llm_unavailable}
+  variants:
+    normal: "Please cancel order #4821."
+  expected:
+    behavior: The request is handed to the support team with an honest message. Nothing is changed.
+    outcome: graceful_failure
+    final_status: escalated
+    escalation_reason: llm_unavailable
+    state:
+      orders: {4821: processing}
+
+- id: intent-call-fails
+  title: The intent classification call fails but the agent carries on
+  tags: [failure-recovery]
+  customer_id: 1001
+  faults:
+    - {type: llm_unavailable, times: 1}
+  variants:
+    normal: "Please cancel order #4821."
+  expected:
+    behavior: >
+      Losing the intent label (the first Claude call) doesn't affect the customer: the
+      agent still cancels order 4821.
+    outcome: order_cancelled
+    final_status: completed
+    must_call:
+      - {tool: cancel_order, args: {order_id: 4821}}
+    state:
+      orders: {4821: cancelled}
