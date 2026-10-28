@@ -23,6 +23,8 @@ class IntentResult(BaseModel):
 
 
 class EscalationReason(StrEnum):
+    # No longer produced (approvals pause the graph since Phase 7); kept so stored
+    # results from before then still load.
     APPROVAL_REQUIRED = "approval_required"
     LLM_UNAVAILABLE = "llm_unavailable"
     MODEL_REFUSAL = "model_refusal"
@@ -66,10 +68,14 @@ class AgentState(TypedDict, total=False):
     intent: dict[str, Any] | None
     llm_calls: Annotated[list[LLMCallRecord], operator.add]
     tool_calls: Annotated[list[ToolCallRecord], operator.add]
-    status: Literal["completed", "escalated"] | None
+    status: Literal["completed", "escalated", "pending_approval"] | None
     escalation_reason: EscalationReason | None
     final_response: str | None
     # State persists across turns (checkpointer), so call lists keep growing; these mark
     # where the current turn starts for per-turn limits and results.
     turn_start_llm: int
     turn_start_tool: int
+    # Human approval: tool results held back while a decision is pending.
+    pending_tool_results: list[dict[str, Any]] | None
+    approval_tool_use_id: str | None
+    approval_id: int | None

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.models import Customer, Order, Return
 from app.domain.enums import OrderStatus, ReturnStatus
 from app.domain.policies import get_policy_text
-from app.domain.rules import evaluate_cancellation, evaluate_return
+from app.domain.rules import REFUND_APPROVAL_THRESHOLD, evaluate_cancellation, evaluate_return
 from app.tools.schemas import (
     CancelOrderResult,
     CreateReturnInput,
@@ -190,6 +190,11 @@ def create_return(
                 f"A refund of ${decision.refund_amount:,.2f} for order #{order.id} "
                 "needs human approval before the return can be created."
             ),
+            details={
+                "order_id": order.id,
+                "refund_amount": str(decision.refund_amount),
+                "approval_threshold": str(REFUND_APPROVAL_THRESHOLD),
+            },
         )
 
     return_request = Return(

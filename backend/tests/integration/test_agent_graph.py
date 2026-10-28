@@ -319,14 +319,14 @@ def test_follow_up_turn_continues_from_the_checkpoint(db: Session) -> None:
     assert [c["purpose"] for c in second.llm_calls] == ["intent", "agent"]  # this turn only
 
 
-def test_high_value_refund_escalates_for_approval(db: Session) -> None:
+def test_high_value_refund_pauses_instead_of_escalating(db: Session) -> None:
     llm = FakeLLM(
         [calls(tool_use("create_return", {"order_id": 7420, "reason": "Screen flickers"}))]
     )
 
     result = run(db, llm, "Return my laptop #7420, the screen flickers")
 
-    assert result.escalation_reason == EscalationReason.APPROVAL_REQUIRED
+    assert result.status == "pending_approval" and result.approval_id is not None
+    assert result.escalation_reason is None
     assert result.tool_calls[0]["error"] == "approval_required"
     assert db.query(Return).filter_by(order_id=7420).count() == 0
-    assert_history_is_valid(result.messages)

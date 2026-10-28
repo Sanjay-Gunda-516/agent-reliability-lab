@@ -33,6 +33,10 @@ class EventType(StrEnum):
     RULE_REJECTION = "rule_rejection"
     ESCALATION = "escalation"
     RESPONSE_FINALIZED = "response_finalized"
+    APPROVAL_REQUESTED = "approval_requested"
+    EXECUTION_PAUSED = "execution_paused"
+    APPROVAL_DECISION = "approval_decision"
+    EXECUTION_RESUMED = "execution_resumed"
     EVALUATION = "evaluation"
     JUDGE = "judge"
 
@@ -84,18 +88,33 @@ class TraceEvent:
 class TraceRecorder:
     """Collects the events of one agent execution (all of its turns), in start order."""
 
-    def __init__(self, execution_id: str | None = None, events: list[TraceEvent] | None = None):
+    def __init__(
+        self,
+        execution_id: str | None = None,
+        events: list[TraceEvent] | None = None,
+        *,
+        last_sequence: int | None = None,
+        turn: int | None = None,
+    ):
+        """`last_sequence`/`turn` continue a trace whose earlier events are already stored
+        (e.g. resuming after an approval in a later request)."""
         self.execution_id = execution_id or new_id()
         self.events: list[TraceEvent] = events if events is not None else []
-        self.turn = max((e.turn for e in self.events), default=0)
+        self._last_sequence = (
+            last_sequence
+            if last_sequence is not None
+            else max((e.sequence for e in self.events), default=0)
+        )
+        self.turn = turn if turn is not None else max((e.turn for e in self.events), default=0)
 
     def start_turn(self) -> int:
         self.turn += 1
         return self.turn
 
     def _new(self, type_: EventType, fields: dict[str, Any]) -> TraceEvent:
+        self._last_sequence += 1
         event = TraceEvent(
-            sequence=len(self.events) + 1,
+            sequence=self._last_sequence,
             type=type_,
             started_at=datetime.now(UTC),
             turn=self.turn,

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,6 +20,8 @@ from app.domain.policies import PolicyType
 @dataclass(frozen=True)
 class ToolContext:
     customer_id: int
+    # Set only by the approval flow after a recorded human decision, never from model output.
+    approved: bool = False
 
 
 class ToolInput(BaseModel):
@@ -58,6 +60,7 @@ class ToolFailure(BaseModel):
     error: ToolErrorCode
     reason: str | None = None
     message: str
+    details: dict[str, Any] | None = None
 
 
 class ToolSuccess(BaseModel):

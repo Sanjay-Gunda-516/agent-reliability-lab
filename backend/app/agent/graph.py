@@ -2,10 +2,13 @@
 
 START -> understand_intent -> agent <-> run_tools
                                 |           |
+                                |           +-> request_approval -> await_decision (pause)
+                                |                    resume -> apply_decision -> agent
                                 +-> finalize -> END
                                 +-> escalate -> END  (also reachable from run_tools)
 """
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,8 +19,10 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import interrupt
 from sqlalchemy.orm import Session
 
+from app.agent import approvals
 from app.agent.checkpoints import get_checkpointer
 from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient, LLMError, LLMUsage
@@ -30,7 +35,8 @@ from app.agent.state import (
 )
 from app.agent.tool_execution import execute_tool_call
 from app.agent.tool_registry import anthropic_tool_definitions
-from app.observability.tracing import EventType, TraceRecorder
+from app.db.lab_models import HumanApprovalRecord
+from app.observability.tracing import EventStatus, EventType, TraceRecorder
 from app.tools.schemas import ToolContext, ToolErrorCode
 
 TOOL_DEFINITIONS = anthropic_tool_definitions()
@@ -39,11 +45,11 @@ HANDOFF_MESSAGE = (
     "I wasn't able to finish this request on my own, so I've passed it to our support team. "
     "Someone will follow up with you shortly."
 )
+PENDING_APPROVAL_MESSAGE = (
+    "This refund needs to be reviewed by a member of our support team before it can be "
+    "processed. I've sent it for review and you'll get an update as soon as it's decided."
+)
 ESCALATION_MESSAGES: dict[EscalationReason, str] = {
-    EscalationReason.APPROVAL_REQUIRED: (
-        "This refund needs to be reviewed by a member of our support team before it can be "
-        "processed. I've passed your request along and they'll follow up with you."
-    ),
     EscalationReason.LLM_UNAVAILABLE: (
         "I'm having trouble processing requests right now. I've passed yours to our support "
         "team and someone will follow up with you shortly."
@@ -221,14 +227,136 @@ def run_tools(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
         previous.append(execution.record)
         result_blocks.append(execution.result_block)
 
+    needs_approval = next(
+        (r for r in records if r["error"] == ToolErrorCode.APPROVAL_REQUIRED), None
+    )
+    if needs_approval is not None:
+        # Hold every result of this turn until a person decides; the conversation
+        # continues with the real outcome rather than "approval required".
+        return {
+            "tool_calls": records,
+            "pending_tool_results": result_blocks,
+            "approval_tool_use_id": needs_approval["tool_use_id"],
+        }
     # All results for one assistant turn go back in a single user message.
-    update: dict[str, Any] = {
-        "messages": [{"role": "user", "content": result_blocks}],
-        "tool_calls": records,
+    return {"messages": [{"role": "user", "content": result_blocks}], "tool_calls": records}
+
+
+def request_approval(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
+    ctx = runtime.context
+    call = next(
+        r
+        for r in reversed(state["tool_calls"])
+        if r["tool_use_id"] == state["approval_tool_use_id"]
+    )
+    approval = approvals.get_or_create(
+        ctx.db, execution_id=ctx.recorder.execution_id, customer_id=ctx.customer_id, call=call
+    )
+    ctx.recorder.point(
+        EventType.APPROVAL_REQUESTED,
+        node="request_approval",
+        tool_name=call["name"],
+        attributes={
+            "approval_id": approval.id,
+            "risk_level": approval.risk_level,
+            "refund_amount": approval.refund_amount,
+        },
+    )
+    return {
+        "approval_id": approval.id,
+        "status": "pending_approval",
+        "final_response": PENDING_APPROVAL_MESSAGE,
     }
-    if any(r["error"] == ToolErrorCode.APPROVAL_REQUIRED for r in records):
-        update["escalation_reason"] = EscalationReason.APPROVAL_REQUIRED
-    return update
+
+
+def await_decision(state: AgentState) -> dict[str, Any]:
+    # Pauses the graph; the checkpoint keeps everything until a later request resumes it.
+    # This node re-runs from the top on resume, so it must stay free of side effects.
+    interrupt({"approval_id": state["approval_id"]})
+    return {}
+
+
+def apply_decision(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
+    """Run the approved action (at most once) or substitute the rejection, then hand the
+    outcome back to Claude as the tool result it was waiting for."""
+    ctx = runtime.context
+    approval_id = state["approval_id"]
+    assert approval_id is not None
+    approval = ctx.db.get(HumanApprovalRecord, approval_id)
+    assert approval is not None
+    ctx.db.refresh(approval)  # the decision was written by another request
+    tool_use_id = approval.tool_use_id
+    call = next(
+        b for m in reversed(state["messages"]) for b in _tool_uses(m["content"])
+        if b["id"] == tool_use_id
+    )  # fmt: skip
+    ctx.recorder.point(
+        EventType.APPROVAL_DECISION,
+        node="apply_decision",
+        tool_name=approval.tool_name,
+        status=EventStatus.OK if approval.status == approvals.APPROVED else EventStatus.REJECTED,
+        attributes={
+            "approval_id": approval.id,
+            "decision": approval.status,
+            "decided_by": approval.decided_by,
+        },
+    )
+
+    new_records: list[ToolCallRecord] = []
+    if approval.status == approvals.APPROVED and approvals.claim_action(ctx.db, approval.id):
+        execution = execute_tool_call(
+            call,
+            db=ctx.db,
+            tool_ctx=ToolContext(customer_id=ctx.customer_id, approved=True),
+            config=ctx.config,
+            previous_calls=list(state.get("tool_calls", [])[state.get("turn_start_tool", 0) :]),
+            sleep=ctx.sleep,
+            before_call=ctx.before_tool_call,
+            recorder=ctx.recorder,
+        )
+        new_records.append(execution.record)
+        result_block = execution.result_block
+        succeeded = execution.record["status"] == "success"
+        approvals.record_outcome(
+            ctx.db,
+            approval.id,
+            action_status=approvals.SUCCEEDED if succeeded else approvals.FAILED,
+            result=execution.record["output"] or execution.record["error"],
+        )
+    elif approval.status == approvals.APPROVED:
+        # Already executed by an earlier resume: report that outcome, never run it again.
+        result_block = {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": json.dumps(approval.action_result, default=str),
+        }
+    elif approval.status == approvals.REJECTED:
+        rejection = {
+            "ok": False,
+            "error": "rejected_by_reviewer",
+            "message": "A member of the support team reviewed this request and declined it.",
+            "note": approval.decision_note,
+        }
+        approvals.record_outcome(ctx.db, approval.id, action_status=None, result=rejection)
+        result_block = {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": json.dumps(rejection),
+        }
+    else:
+        raise RuntimeError(f"approval {approval.id} resumed while still {approval.status}")
+
+    pending = state.get("pending_tool_results") or []
+    results = [result_block if b["tool_use_id"] == tool_use_id else b for b in pending]
+    return {
+        "messages": [{"role": "user", "content": results}],
+        "tool_calls": new_records,
+        "pending_tool_results": None,
+        "approval_tool_use_id": None,
+        "approval_id": None,
+        "status": None,
+        "final_response": None,
+    }
 
 
 def finalize(state: AgentState) -> dict[str, Any]:
@@ -278,7 +406,9 @@ def route_after_agent(state: AgentState) -> Literal["run_tools", "finalize", "es
     return "finalize"
 
 
-def route_after_tools(state: AgentState) -> Literal["agent", "escalate"]:
+def route_after_tools(state: AgentState) -> Literal["agent", "escalate", "request_approval"]:
+    if state.get("approval_tool_use_id"):
+        return "request_approval"
     return "escalate" if state.get("escalation_reason") else "agent"
 
 
@@ -291,11 +421,19 @@ def build_agent_graph(
     graph.add_node("run_tools", run_tools)
     graph.add_node("finalize", finalize)
     graph.add_node("escalate", escalate)
+    graph.add_node("request_approval", request_approval)
+    graph.add_node("await_decision", await_decision)
+    graph.add_node("apply_decision", apply_decision)
 
     graph.add_edge(START, "understand_intent")
     graph.add_edge("understand_intent", "agent")
     graph.add_conditional_edges("agent", route_after_agent, ["run_tools", "finalize", "escalate"])
-    graph.add_conditional_edges("run_tools", route_after_tools, ["agent", "escalate"])
+    graph.add_conditional_edges(
+        "run_tools", route_after_tools, ["agent", "escalate", "request_approval"]
+    )
+    graph.add_edge("request_approval", "await_decision")
+    graph.add_edge("await_decision", "apply_decision")
+    graph.add_edge("apply_decision", "agent")
     graph.add_edge("finalize", END)
     graph.add_edge("escalate", END)
     return graph.compile(checkpointer=checkpointer)

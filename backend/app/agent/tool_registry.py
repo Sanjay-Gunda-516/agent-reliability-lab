@@ -81,7 +81,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "given a reason. Eligibility is checked by the system."
         ),
         input_model=CreateReturnInput,
-        handler=orders.create_return,
+        handler=lambda db, ctx, args: orders.create_return(db, ctx, args, approved=ctx.approved),
     ),
     ToolSpec(
         name="get_policy",

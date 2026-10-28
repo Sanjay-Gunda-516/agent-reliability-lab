@@ -41,10 +41,16 @@ def event_rows(events: list[TraceEvent]) -> list[TraceEventRecord]:
 
 
 def tool_call_rows(calls: list[ToolCallRecord], events: list[TraceEvent]) -> list[ToolCallRow]:
-    spans = {e.attributes.get("tool_use_id"): e for e in events if e.type == EventType.TOOL_CALL}
+    # A tool_use id can run twice (refused for approval, then executed once approved),
+    # so each call takes the next span recorded for its id.
+    spans: dict[str, list[TraceEvent]] = {}
+    for event in events:
+        if event.type == EventType.TOOL_CALL:
+            spans.setdefault(event.attributes.get("tool_use_id", ""), []).append(event)
     rows = []
     for sequence, call in enumerate(calls, 1):
-        span = spans.get(call["tool_use_id"])
+        queue = spans.get(call["tool_use_id"]) or []
+        span = queue.pop(0) if queue else None
         rows.append(
             ToolCallRow(
                 sequence=sequence,

@@ -245,3 +245,36 @@ class ToolCallRow(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     trace: Mapped[ExecutionTraceRecord] = relationship(back_populates="tool_calls")
+
+
+class HumanApprovalRecord(Base):
+    """A high-risk action paused for a person to approve or reject.
+
+    `status` is the decision (pending -> approved | rejected); `action_status` tracks the
+    approved action itself (not_run -> executing -> succeeded | failed), which is what
+    guarantees it runs at most once.
+    """
+
+    __tablename__ = "human_approvals"
+    __table_args__ = (UniqueConstraint("execution_id", "tool_use_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    execution_id: Mapped[str] = mapped_column(String(32), index=True)
+    tool_use_id: Mapped[str] = mapped_column(String(100))
+    tool_name: Mapped[str] = mapped_column(String(50))
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    customer_id: Mapped[int]
+    # Not a foreign key: the demo store is reset by seeding, approvals are history.
+    order_id: Mapped[int | None]
+    refund_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    risk_level: Mapped[str] = mapped_column(String(10))
+    reason: Mapped[str] = mapped_column(Text)  # why the system needs a human
+    customer_reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), index=True)
+    decided_by: Mapped[str | None] = mapped_column(String(100))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    action_status: Mapped[str] = mapped_column(String(10))
+    action_result: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    resumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
