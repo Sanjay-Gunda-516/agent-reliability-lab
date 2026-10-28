@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 import anthropic
+from langsmith import traceable
 from pydantic import BaseModel, Field
 
 from app.agent.config import Effort
@@ -169,6 +170,7 @@ class ClaudeJudge:
     def model(self) -> str:
         return self._model
 
+    @traceable(run_type="chain", name="judge")
     def judge(self, request: JudgeRequest) -> JudgeResult:
         started = time.perf_counter()
         try:

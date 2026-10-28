@@ -9,7 +9,8 @@ from app.agent.config import AgentConfig
 from app.agent.graph import AgentContext, get_agent_graph
 from app.agent.llm import LLMClient
 from app.agent.state import EscalationReason, LLMCallRecord, ToolCallRecord
-from app.observability.context import correlate
+from app.observability.context import correlate, current
+from app.observability.langsmith import langsmith_run
 from app.observability.tracing import EventType, TraceRecorder
 
 
@@ -57,12 +58,19 @@ def run_agent(
             before_tool_call=before_tool_call,
             recorder=recorder,
         )
-        state = get_agent_graph().invoke(
-            {"messages": [*(history or []), {"role": "user", "content": message}]},
-            context=context,
-            # LangGraph's own cap on node executions, a backstop behind max_agent_turns.
-            config={"recursion_limit": 2 * config.max_agent_turns + 5},
-        )
+        with langsmith_run(
+            {**current().fields(), "model": config.model, "prompt_version": config.prompt_version},
+            tags=["support-agent"],
+        ):
+            state = get_agent_graph().invoke(
+                {"messages": [*(history or []), {"role": "user", "content": message}]},
+                context=context,
+                config={
+                    "run_name": "support-agent",
+                    # LangGraph's own cap on node executions, a backstop behind max_agent_turns.
+                    "recursion_limit": 2 * config.max_agent_turns + 5,
+                },
+            )
         if state["status"] == "escalated":
             recorder.point(
                 EventType.ESCALATION,

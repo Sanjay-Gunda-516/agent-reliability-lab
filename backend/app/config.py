@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     # returns 503 when it's missing.
     anthropic_api_key: SecretStr | None = None
 
+    # Optional LangSmith tracing. Our own database traces stay the system of record.
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "agent-reliability-lab"
+    langsmith_endpoint: str | None = None  # e.g. the EU region; default is the US API
+    langsmith_hide_content: bool = False  # send structure and timing, not prompts or replies
+
 
 @lru_cache
 def get_settings() -> Settings:

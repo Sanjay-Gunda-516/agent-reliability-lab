@@ -17,6 +17,7 @@ from anthropic.types.beta import BetaMessageParam, BetaToolParam
 from app.agent.config import AgentConfig
 from app.agent.prompts import INTENT_PROMPT
 from app.agent.state import IntentResult
+from app.observability.langsmith import instrument
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,8 @@ def _usage(raw: Any) -> LLMUsage:
 class ClaudeClient:
     def __init__(self, api_key: str, *, max_retries: int = 2, timeout_s: float = 60.0) -> None:
         # The SDK already retries connection errors, 408/409/429 and 5xx with backoff.
-        self._client = anthropic.Anthropic(
-            api_key=api_key, max_retries=max_retries, timeout=timeout_s
+        self._client = instrument(
+            anthropic.Anthropic(api_key=api_key, max_retries=max_retries, timeout=timeout_s)
         )
 
     def classify_intent(self, transcript: str, config: AgentConfig) -> IntentClassification:

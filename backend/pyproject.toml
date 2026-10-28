@@ -41,6 +41,8 @@ markers = [
 filterwarnings = [
     # langsmith (a langgraph dependency) still uses an API deprecated in Python 3.14.
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:langsmith.*",
+    # Raised inside langsmith.wrappers when it imports its own deprecated submodule.
+    "ignore:langsmith.wrappers._openai_agents is deprecated:DeprecationWarning",
 ]
 
 [tool.ruff]
