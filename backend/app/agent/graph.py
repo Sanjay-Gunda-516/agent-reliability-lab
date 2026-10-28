@@ -28,6 +28,7 @@ from app.agent.state import (
 )
 from app.agent.tool_execution import execute_tool_call
 from app.agent.tool_registry import anthropic_tool_definitions
+from app.observability.tracing import EventType, TraceRecorder
 from app.tools.schemas import ToolContext, ToolErrorCode
 
 TOOL_DEFINITIONS = anthropic_tool_definitions()
@@ -58,6 +59,7 @@ class AgentContext:
     config: AgentConfig = field(default_factory=AgentConfig)
     sleep: Callable[[float], None] = time.sleep
     before_tool_call: Callable[[str], None] | None = None
+    recorder: TraceRecorder = field(default_factory=TraceRecorder)
 
 
 def _call_record(
@@ -105,11 +107,19 @@ def _transcript(messages: list[dict[str, Any]], max_messages: int = 6) -> str:
 
 def understand_intent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
-    try:
-        classification = ctx.llm.classify_intent(_transcript(state["messages"]), ctx.config)
-    except LLMError as exc:
-        # Intent is for evaluation and tracing; an outage is handled by the agent node.
-        return {"intent": None, "llm_calls": [_failed_call("intent", ctx, exc)]}
+    with ctx.recorder.span(
+        EventType.INTENT, node="understand_intent", model=ctx.config.model
+    ) as event:
+        try:
+            classification = ctx.llm.classify_intent(_transcript(state["messages"]), ctx.config)
+        except LLMError as exc:
+            # Intent is for evaluation and tracing; an outage is handled by the agent node.
+            event.fail(exc)
+            return {"intent": None, "llm_calls": [_failed_call("intent", ctx, exc)]}
+        event.set_usage(classification.model, classification.usage)
+        event.attributes["stop_reason"] = classification.stop_reason
+        if classification.result:
+            event.attributes["intent"] = str(classification.result.intent)
     return {
         "intent": classification.result.model_dump(mode="json") if classification.result else None,
         "llm_calls": [
@@ -136,18 +146,25 @@ def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     if turns >= ctx.config.max_agent_turns:
         return {"escalation_reason": EscalationReason.STEP_LIMIT}
 
-    try:
-        response = ctx.llm.respond(
-            system=SYSTEM_PROMPTS[ctx.config.prompt_version],
-            messages=state["messages"],
-            tools=TOOL_DEFINITIONS,
-            config=ctx.config,
-        )
-    except LLMError as exc:
-        return {
-            "escalation_reason": EscalationReason.LLM_UNAVAILABLE,
-            "llm_calls": [_failed_call("agent", ctx, exc)],
-        }
+    with ctx.recorder.span(EventType.MODEL_CALL, node="agent", model=ctx.config.model) as event:
+        try:
+            response = ctx.llm.respond(
+                system=SYSTEM_PROMPTS[ctx.config.prompt_version],
+                messages=state["messages"],
+                tools=TOOL_DEFINITIONS,
+                config=ctx.config,
+            )
+        except LLMError as exc:
+            event.fail(exc)
+            event.attributes["transient"] = exc.transient
+            return {
+                "escalation_reason": EscalationReason.LLM_UNAVAILABLE,
+                "llm_calls": [_failed_call("agent", ctx, exc)],
+            }
+        event.set_usage(response.model, response.usage)
+        event.attributes["stop_reason"] = response.stop_reason
+        if response.stop_reason in ("refusal", "max_tokens"):
+            event.fail(response.stop_reason)
 
     record = _call_record(
         "agent", response.model, response.stop_reason, response.usage, response.latency_ms
@@ -163,6 +180,13 @@ def agent(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         "llm_calls": [record],
     }
     pending = _tool_uses(response.content)
+    for block in pending:
+        ctx.recorder.point(
+            EventType.TOOL_SELECTED,
+            node="agent",
+            tool_name=block["name"],
+            attributes={"tool_use_id": block["id"]},
+        )
     if pending and len(state.get("tool_calls", [])) + len(pending) > ctx.config.max_tool_calls:
         update["escalation_reason"] = EscalationReason.TOOL_CALL_LIMIT
     return update
@@ -184,6 +208,7 @@ def run_tools(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             previous_calls=previous,
             sleep=ctx.sleep,
             before_call=ctx.before_tool_call,
+            recorder=ctx.recorder,
         )
         records.append(execution.record)
         previous.append(execution.record)

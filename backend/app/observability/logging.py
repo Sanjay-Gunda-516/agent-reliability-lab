@@ -49,6 +49,11 @@ def _correlated_record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
     return record
 
 
+# Installed on import, so records carry ids even where logging was never configured
+# (tests, one-off scripts).
+logging.setLogRecordFactory(_correlated_record_factory)
+
+
 def redact(value: Any) -> Any:
     if isinstance(value, str):
         for pattern, replacement in _SECRETS:
@@ -108,7 +113,6 @@ class _AppHandler(logging.StreamHandler):  # type: ignore[type-arg]
 
 def configure_logging(settings: LoggingSettings | None = None) -> None:
     settings = settings or LoggingSettings()
-    logging.setLogRecordFactory(_correlated_record_factory)
     handler = _AppHandler(sys.stderr)
     handler.setFormatter(JsonFormatter() if settings.log_format == "json" else TextFormatter())
     root = logging.getLogger()

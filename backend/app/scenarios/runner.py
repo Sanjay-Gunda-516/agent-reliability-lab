@@ -24,6 +24,7 @@ from app.db.models import Order, OrderItem, Return
 from app.db.session import get_engine
 from app.domain.enums import OrderStatus, ReturnStatus
 from app.observability.context import correlate
+from app.observability.tracing import TraceEvent, TraceRecorder
 from app.scenarios.faults import InjectedFault, apply_faults
 from app.scenarios.schema import OrderFixture, Persona, Scenario, Tag, variant_id
 from app.seed import reset_demo_data
@@ -58,6 +59,8 @@ class ScenarioRun:
     customer_id: int
     started_at: datetime
     latency_ms: float
+    execution_id: str = ""
+    events: list[TraceEvent] = field(default_factory=list)
     turns: list[TurnResult] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
     initial_state: StateSnapshot | None = None
@@ -134,9 +137,14 @@ def run_scenario(
     initial_state: StateSnapshot | None = None
     final_state: StateSnapshot | None = None
     error: str | None = None
+    recorder = TraceRecorder()
 
     with (
-        correlate(scenario_id=scenario.id, variant_id=variant_id(scenario.id, persona)),
+        correlate(
+            scenario_id=scenario.id,
+            variant_id=variant_id(scenario.id, persona),
+            execution_id=recorder.execution_id,
+        ),
         (engine or get_engine()).connect() as connection,
     ):
         transaction = connection.begin()
@@ -154,6 +162,7 @@ def run_scenario(
                     history=messages,
                     config=config,
                     before_tool_call=before_tool_call,
+                    recorder=recorder,
                 )
                 messages = result.messages
                 turns.append(
@@ -184,6 +193,8 @@ def run_scenario(
         customer_id=scenario.customer_id,
         started_at=started_at,
         latency_ms=(time.perf_counter() - started) * 1000,
+        execution_id=recorder.execution_id,
+        events=recorder.events,
         turns=turns,
         messages=messages,
         initial_state=initial_state,

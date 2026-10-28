@@ -7,7 +7,9 @@ from app.evaluation.checks import evaluate_run
 from app.evaluation.judge import Judge, JudgeResult, build_judge_request, judge_checks
 from app.evaluation.metrics import TokenTotals, VariantSummary
 from app.evaluation.pricing import cost_of_calls, estimate_cost
-from app.evaluation.results import CheckResult, Verdict, verdict_for
+from app.evaluation.results import CheckResult, CheckSource, Severity, Verdict, verdict_for
+from app.observability.context import correlate
+from app.observability.tracing import EventType, TraceRecorder
 from app.scenarios.runner import ScenarioRun
 from app.scenarios.schema import Scenario
 
@@ -24,21 +26,45 @@ class EvaluatedVariant:
     summary: VariantSummary
 
 
-def _judge(judge: Judge, scenario: Scenario, run: ScenarioRun) -> JudgeResult:
-    try:
-        return judge.judge(build_judge_request(scenario, run))
-    except Exception as exc:
-        # The judge is a second opinion; it must never take down an evaluation.
-        logger.exception("Judge crashed on %s", run.variant_id)
-        return JudgeResult(None, judge.model, error=f"{type(exc).__name__}: {exc}")
+def _judge(
+    judge: Judge, scenario: Scenario, run: ScenarioRun, recorder: TraceRecorder
+) -> JudgeResult:
+    with recorder.span(EventType.JUDGE, model=judge.model) as event:
+        try:
+            result = judge.judge(build_judge_request(scenario, run))
+        except Exception as exc:
+            # The judge is a second opinion; it must never take down an evaluation.
+            logger.exception("Judge crashed on %s", run.variant_id)
+            event.fail(exc)
+            return JudgeResult(None, judge.model, error=f"{type(exc).__name__}: {exc}")
+        event.set_usage(result.model, result.usage)
+        if result.verdict is None:
+            event.fail(result.error or "no_verdict")
+        else:
+            event.attributes["behavior"] = result.verdict.behavior
+            event.attributes["unsupported_claims"] = len(result.verdict.unsupported_claims)
+        return result
 
 
 def evaluate_variant(scenario: Scenario, run: ScenarioRun, judge: Judge | None) -> EvaluatedVariant:
-    checks = evaluate_run(scenario, run)
-    judge_result = None
-    if judge is not None and run.error is None and run.turns:
-        judge_result = _judge(judge, scenario, run)
-        checks += judge_checks(judge_result)
+    # Grading events are appended to the run's own trace, after the conversation.
+    recorder = TraceRecorder(run.execution_id or None, run.events)
+    with (
+        correlate(execution_id=recorder.execution_id),
+        recorder.span(EventType.EVALUATION) as event,
+    ):
+        checks = evaluate_run(scenario, run)
+        judge_result = None
+        if judge is not None and run.error is None and run.turns:
+            judge_result = _judge(judge, scenario, run, recorder)
+            checks += judge_checks(judge_result)
+        verdict = verdict_for(checks)
+        failed = [c for c in checks if not c.passed and c.source == CheckSource.DETERMINISTIC]
+        event.attributes.update(
+            verdict=str(verdict),
+            critical_failures=sum(c.severity == Severity.CRITICAL for c in failed),
+            major_failures=sum(c.severity == Severity.MAJOR for c in failed),
+        )
 
     calls = run.llm_calls
     judge_tokens = judge_cost = None
@@ -59,7 +85,6 @@ def evaluate_variant(scenario: Scenario, run: ScenarioRun, judge: Judge | None) 
             usage.cache_read_input_tokens,
         )
 
-    verdict = verdict_for(checks)
     summary = VariantSummary(
         variant_id=run.variant_id,
         tags=[str(tag) for tag in scenario.tags],
