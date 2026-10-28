@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
+    "alembic>=1.14",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,11 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+# The local alembic/ migrations folder would otherwise shadow the alembic package.
+known-first-party = ["app"]
+known-third-party = ["alembic"]
 
 [tool.mypy]
 python_version = "3.12"
