@@ -6,6 +6,7 @@ from typing import Any
 
 from app.agent.state import LLMCallRecord, ToolCallRecord
 from app.domain.enums import OrderStatus, ReturnStatus
+from app.evaluation.judge import JudgeRequest, JudgeResult, JudgeVerdict
 from app.scenarios.faults import InjectedFault
 from app.scenarios.runner import ScenarioRun, StateSnapshot, TurnResult
 from app.scenarios.schema import Persona, Scenario
@@ -141,3 +142,20 @@ def correct_cancel_run(scenario: Scenario) -> ScenarioRun:
         ],
         final=snapshot({4821: OrderStatus.CANCELLED}),
     )
+
+
+class FakeJudge:
+    """Returns a fixed verdict (or error) and records what it was asked."""
+
+    def __init__(self, verdict: JudgeVerdict | None = None, error: str | None = None) -> None:
+        self.verdict = verdict
+        self.error = error
+        self.requests: list[JudgeRequest] = []
+
+    @property
+    def model(self) -> str:
+        return "fake-judge"
+
+    def judge(self, request: JudgeRequest) -> JudgeResult:
+        self.requests.append(request)
+        return JudgeResult(self.verdict, "fake-judge", error=self.error)
