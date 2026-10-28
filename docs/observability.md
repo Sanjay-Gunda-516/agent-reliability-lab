@@ -59,6 +59,10 @@ things are point events (no duration).
 | `tool_retry` | point | tool, attempt number, error type and message (inside its `tool_call`) |
 | `rule_rejection` | point | tool, error code and rule reason (e.g. `already_shipped`) |
 | `escalation` | point | escalation reason |
+| `approval_requested` | point | approval id, risk level, refund amount |
+| `execution_paused` | point | approval id (the run waits for a human decision) |
+| `execution_resumed` | point | approval id (a later request resumes the same trace) |
+| `approval_decision` | point | decision and reviewer; status `ok` or `rejected` |
 | `response_finalized` | point | final status, reply length |
 | `evaluation` | span | verdict, critical and major failure counts |
 | `judge` | span | judge model, tokens, behaviour verdict, unsupported-claim count |

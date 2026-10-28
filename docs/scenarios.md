@@ -25,7 +25,8 @@ cd backend
     behavior: >                       # what a correct agent does, in words
       Explains that order 8821 has shipped and can't be cancelled, and offers a return.
     outcome: cancellation_refused
-    final_status: completed           # or escalated (then escalation_reason is required)
+    final_status: completed           # or escalated (then escalation_reason is required),
+                                      # or pending_approval (with outcome: approval_requested)
     intent: cancel_order              # intent of the first turn; omit to skip grading it
     must_call: []                     # calls that must happen; args are a subset match
     must_not_call:

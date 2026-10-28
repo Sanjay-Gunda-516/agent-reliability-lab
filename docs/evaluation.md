@@ -22,7 +22,7 @@ failed.
 | Check | Severity | Fails when |
 |---|---|---|
 | `execution.crash` | critical | The run itself crashed (the verdict becomes `error`; nothing else is graded) |
-| `status.final` | critical / major | Missed a required escalation (critical) or escalated when it shouldn't have (major) |
+| `status.final` | critical / major | Missed a required escalation or approval pause (critical), or handed off when it shouldn't have (major) |
 | `escalation.reason` | major | Escalated for the wrong reason |
 | `tools.selection` | major | A required tool was never called |
 | `tools.arguments` | major | The tool was called, but never with the expected arguments (subset match) |

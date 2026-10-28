@@ -66,6 +66,12 @@ Test scenarios for the agent live in `backend/scenarios/*.yaml`. See
 Every agent execution is traced (`GET /traces/{execution_id}`), logs carry correlation
 ids, and LangSmith tracing is optional. See [docs/observability.md](docs/observability.md).
 
+## Human approvals
+
+Refunds over $500 pause the conversation until a support team member approves or
+rejects them (`/approvals`); the same execution then resumes. See
+[docs/human-in-the-loop.md](docs/human-in-the-loop.md).
+
 ## Evaluations
 
 Scenario runs are graded by deterministic checks, with an optional LLM judge for what
