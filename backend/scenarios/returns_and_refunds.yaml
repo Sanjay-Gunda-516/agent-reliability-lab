@@ -110,7 +110,7 @@
       returns: {8821: false}
 
 - id: high-value-refund-needs-approval
-  title: Return of a $1,249 laptop needs human approval
+  title: Return of a $1,249 laptop pauses for human approval
   tags: [escalation, policy]
   customer_id: 1001
   variants:
@@ -119,11 +119,10 @@
   expected:
     behavior: >
       Tries to start the return for order 7420. Because the $1,249.00 refund is over
-      the review threshold, the request is handed to the support team for approval and
-      no return is created yet.
-    outcome: approval_escalated
-    final_status: escalated
-    escalation_reason: approval_required
+      the review threshold, the conversation pauses for a support team member to approve
+      it, the customer is told it's under review, and no return is created yet.
+    outcome: approval_requested
+    final_status: pending_approval
     intent: return_request
     must_call:
       - {tool: create_return, args: {order_id: 7420}, result: rejected}

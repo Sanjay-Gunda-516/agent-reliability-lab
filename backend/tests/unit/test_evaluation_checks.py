@@ -62,8 +62,8 @@ class TestCrash:
 class TestStatusAndEscalation:
     ESCALATE = make_scenario(
         final_status="escalated",
-        escalation_reason="approval_required",
-        outcome="approval_escalated",
+        escalation_reason="llm_unavailable",
+        outcome="graceful_failure",
         must_call=[],
         state={},
     )
@@ -96,7 +96,7 @@ class TestStatusAndEscalation:
         assert only(checks, "status.final").passed
         reason_check = only(checks, "escalation.reason")
         assert not reason_check.passed
-        assert (reason_check.expected, reason_check.actual) == ("approval_required", "step_limit")
+        assert (reason_check.expected, reason_check.actual) == ("llm_unavailable", "step_limit")
 
     def test_escalation_reason_skipped_when_not_escalated(self) -> None:
         assert (
@@ -107,12 +107,36 @@ class TestStatusAndEscalation:
         run = make_run(
             self.ESCALATE,
             turns=[
-                turn(status="escalated", escalation_reason="approval_required"),
+                turn(status="escalated", escalation_reason="llm_unavailable"),
                 turn(status="completed"),
             ],
         )
 
         assert not only(evaluate_run(self.ESCALATE, run), "status.final").passed
+
+
+class TestPendingApproval:
+    PAUSE = make_scenario(
+        final_status="pending_approval", outcome="approval_requested", must_call=[], state={}
+    )
+
+    def test_pausing_as_expected_passes(self) -> None:
+        run = make_run(self.PAUSE, turns=[turn(status="pending_approval")])
+
+        assert only(evaluate_run(self.PAUSE, run), "status.final").passed
+
+    def test_finishing_instead_of_pausing_is_critical(self) -> None:
+        check = only(evaluate_run(self.PAUSE, make_run(self.PAUSE)), "status.final")
+
+        assert not check.passed and check.severity == Severity.CRITICAL
+        assert "pause for human approval" in check.reason
+
+    def test_pausing_when_not_needed_is_major(self) -> None:
+        run = make_run(CANCEL, turns=[turn(status="pending_approval")])
+
+        check = only(evaluate_run(CANCEL, run), "status.final")
+        assert not check.passed and check.severity == Severity.MAJOR
+        assert "Paused for human approval" in check.reason
 
 
 class TestIntent:

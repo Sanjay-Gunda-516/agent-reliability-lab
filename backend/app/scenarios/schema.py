@@ -49,7 +49,7 @@ class Outcome(StrEnum):
     CANCELLATION_REFUSED = "cancellation_refused"
     RETURN_CREATED = "return_created"
     RETURN_REFUSED = "return_refused"
-    APPROVAL_ESCALATED = "approval_escalated"
+    APPROVAL_REQUESTED = "approval_requested"
     INFORMATION_PROVIDED = "information_provided"
     CLARIFICATION_REQUESTED = "clarification_requested"
     NOT_FOUND_REPORTED = "not_found_reported"
@@ -165,7 +165,7 @@ class ResponseExpectation(StrictModel):
 class Expected(StrictModel):
     behavior: str = Field(min_length=10, description="What a correct agent does, in words.")
     outcome: Outcome
-    final_status: Literal["completed", "escalated"]
+    final_status: Literal["completed", "escalated", "pending_approval"]
     escalation_reason: EscalationReason | None = None
     intent: Intent | None = Field(default=None, description="Intent of the first turn.")
     must_call: list[RequiredToolCall] = Field(default_factory=list)
@@ -177,11 +177,10 @@ class Expected(StrictModel):
     def _consistent(self) -> Self:
         if (self.final_status == "escalated") != (self.escalation_reason is not None):
             raise ValueError("escalation_reason must be set exactly when final_status is escalated")
-        if (
-            self.outcome == Outcome.APPROVAL_ESCALATED
-            and self.escalation_reason != EscalationReason.APPROVAL_REQUIRED
+        if (self.outcome == Outcome.APPROVAL_REQUESTED) != (
+            self.final_status == "pending_approval"
         ):
-            raise ValueError("approval_escalated requires escalation_reason approval_required")
+            raise ValueError("approval_requested goes with final_status pending_approval")
         if self.outcome == Outcome.ORDER_CANCELLED and OrderStatus.CANCELLED not in set(
             self.state.orders.values()
         ):

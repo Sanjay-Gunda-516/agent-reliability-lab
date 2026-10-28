@@ -53,10 +53,15 @@ class TestRequest:
 
     def test_handoff_is_shown_as_evidence(self) -> None:
         text = request_for(
-            status="escalated", escalation_reason="approval_required", tools=[]
+            status="escalated", escalation_reason="llm_unavailable", tools=[]
         ).render()
 
-        assert "handed to the support team (reason: approval_required)" in text
+        assert "handed to the support team (reason: llm_unavailable)" in text
+
+    def test_pending_approval_is_shown_as_evidence(self) -> None:
+        text = request_for(status="pending_approval", tools=[]).render()
+
+        assert "(reason: awaiting approval by the support team)" in text
 
     def test_failed_tool_shows_its_error(self) -> None:
         down = tool_call(

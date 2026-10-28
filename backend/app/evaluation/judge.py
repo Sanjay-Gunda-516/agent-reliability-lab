@@ -122,7 +122,13 @@ def build_judge_request(scenario: Scenario, run: ScenarioRun) -> JudgeRequest:
                     for call in turn.tool_calls
                 ],
                 assistant=turn.final_response,
-                handed_off_reason=turn.escalation_reason if turn.status == "escalated" else None,
+                handed_off_reason=(
+                    turn.escalation_reason
+                    if turn.status == "escalated"
+                    else "awaiting approval by the support team"
+                    if turn.status == "pending_approval"
+                    else None
+                ),
             )
             for turn in run.turns
         ],

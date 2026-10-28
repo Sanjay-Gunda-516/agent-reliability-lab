@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, computed_field
 
-from app.evaluation.results import CheckResult, CheckSource, Severity, Verdict
+from app.evaluation.results import HUMAN_STATUSES, CheckResult, CheckSource, Severity, Verdict
 
 
 class Rate(BaseModel):
@@ -173,8 +173,9 @@ def compute_metrics(variants: list[VariantSummary]) -> RunMetrics:
         judge_behavior=_rate(judged("judge.behavior")),
         judge_grounded=_rate(judged("judge.grounded")),
         forbidden_tool_violations=sum(not c.passed for c in deterministic("tools.forbidden")),
-        missed_escalations=sum(c.expected == "escalated" for c in status_failures),
-        unnecessary_escalations=sum(c.expected != "escalated" for c in status_failures),
+        # "Escalation" here includes pausing for approval: both bring in a person.
+        missed_escalations=sum(c.expected in HUMAN_STATUSES for c in status_failures),
+        unnecessary_escalations=sum(c.expected not in HUMAN_STATUSES for c in status_failures),
         failed_checks=dict(
             sorted(
                 Counter(

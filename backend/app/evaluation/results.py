@@ -34,6 +34,9 @@ class CheckResult:
 
 CRASH_CHECK = "execution.crash"
 
+# Final statuses where a person has to step in (a handoff, or a pause for approval).
+HUMAN_STATUSES = frozenset({"escalated", "pending_approval"})
+
 
 def verdict_for(checks: list[CheckResult]) -> Verdict:
     """Only deterministic checks decide the verdict; judge findings are reported alongside."""

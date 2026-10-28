@@ -140,6 +140,11 @@ class TestRates:
         assert (metrics.escalation_accuracy.passed, metrics.escalation_accuracy.total) == (1, 4)
         assert (metrics.missed_escalations, metrics.unnecessary_escalations) == (1, 1)
 
+    def test_a_missed_approval_pause_counts_as_a_missed_escalation(self) -> None:
+        missed = check("status.final", False, Severity.CRITICAL, "pending_approval")
+
+        assert compute_metrics([variant(Verdict.FAIL, [missed])]).missed_escalations == 1
+
     def test_failure_recovery_only_counts_faulted_variants(self) -> None:
         metrics = compute_metrics(
             [

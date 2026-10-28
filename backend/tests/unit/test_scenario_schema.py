@@ -52,6 +52,7 @@ def test_valid_scenario_parses_with_single_turn_shorthand() -> None:
         ({"expected.must_call": [{"tool": "get_order", "args": {"id": 1}}]}, "no argument"),
         ({"expected.typo_field": 1}, "Extra inputs"),
         ({"expected.final_status": "escalated"}, "escalation_reason"),
+        ({"expected.final_status": "pending_approval"}, "approval_requested"),
         ({"expected.state": {"orders": {4821: "processing"}}}, "order_cancelled"),
         ({"id": "Not A Slug"}, "pattern"),
         ({"variants": {"normal": ["first", "second"]}}, "multi-turn"),
