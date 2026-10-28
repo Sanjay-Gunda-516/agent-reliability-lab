@@ -71,10 +71,12 @@ _UNITS = {"m": "minutes", "h": "hours", "d": "days"}
 def _parse_duration(value: Any) -> Any:
     if isinstance(value, str):
         match = _DURATION.match(value.strip())
-        if not match:
+        if match:
+            amount, unit = match.groups()
+            return timedelta(**{_UNITS[unit]: float(amount)})
+        # ISO 8601 ("PT23H") is how stored definitions serialize durations.
+        if not value.startswith("P"):
             raise ValueError(f"expected a duration like '30m', '2h' or '3d', got {value!r}")
-        amount, unit = match.groups()
-        return timedelta(**{_UNITS[unit]: float(amount)})
     return value
 
 

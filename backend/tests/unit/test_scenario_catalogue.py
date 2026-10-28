@@ -50,3 +50,12 @@ def test_scenario_refers_to_real_customers_and_orders(scenario: Scenario) -> Non
 def test_setup_orders_use_new_ids(scenario: Scenario) -> None:
     # Fixtures add orders; silently replacing a demo order would confuse other expectations.
     assert not {o.id for o in scenario.setup.orders} & ORDERS
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
+def test_stored_definition_round_trips(scenario: Scenario) -> None:
+    """The database stores model_dump(mode="json"); it must load back identically."""
+    reloaded = Scenario.model_validate(scenario.model_dump(mode="json"))
+
+    assert reloaded == scenario
+    assert reloaded.content_hash() == scenario.content_hash()
