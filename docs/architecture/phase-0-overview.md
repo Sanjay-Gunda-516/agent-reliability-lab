@@ -645,6 +645,7 @@ agent-reliability-lab/
 │   │   ├── db/                 # SQLAlchemy models, session, Alembic env
 │   │   └── main.py
 │   ├── alembic/                # migrations
+│   ├── scenarios/              # scenario definitions (YAML, source of truth)
 │   ├── tests/
 │   │   ├── unit/
 │   │   ├── integration/

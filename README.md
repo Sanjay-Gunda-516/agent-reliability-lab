@@ -46,3 +46,17 @@ Run from `backend/`:
 
 Integration tests run against a separate `<database>_test` database that is
 recreated and migrated on every test session, so they never touch development data.
+
+Tests that call the real Claude API are skipped unless you pass `--live`
+(`.venv/bin/pytest --live -k live`). They need `ANTHROPIC_API_KEY` in `backend/.env`.
+
+## Scenarios
+
+Test scenarios for the agent live in `backend/scenarios/*.yaml`. See
+[docs/scenarios.md](docs/scenarios.md) for the format.
+
+```bash
+.venv/bin/python -m app.seed             # reset the demo store
+.venv/bin/python -m app.scenarios check  # validate scenario files
+.venv/bin/python -m app.scenarios sync   # load them into the database
+```
