@@ -4,6 +4,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import URL, create_engine, make_url, text
+from sqlalchemy.orm import Session
 
 from app.config import BACKEND_DIR, get_settings
 from app.db.session import get_engine, get_sessionmaker
@@ -44,3 +45,20 @@ def test_database(alembic_config: Config) -> Iterator[URL]:
         get_engine().dispose()
 
     reset_cached_db_objects()
+
+
+@pytest.fixture
+def db_session(test_database: URL) -> Iterator[Session]:
+    """A session whose changes, including commits, are rolled back after each test."""
+    connection = get_engine().connect()
+    transaction = connection.begin()
+    # Commits inside the code under test become savepoint releases on this connection.
+    session = Session(
+        bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
+    )
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
