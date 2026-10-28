@@ -243,6 +243,8 @@ class Scenario(StrictModel):
             raise ValueError("tag multi-turn exactly when a variant has more than one turn")
         if self.faults and Tag.FAILURE_RECOVERY not in self.tags:
             raise ValueError("scenarios with faults must be tagged failure-recovery")
+        if sum(f.type == FaultType.LLM_UNAVAILABLE for f in self.faults) > 1:
+            raise ValueError("use a single llm_unavailable fault")
         return self
 
     def content_hash(self) -> str:
