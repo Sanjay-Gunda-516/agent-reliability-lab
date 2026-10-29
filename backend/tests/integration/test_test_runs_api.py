@@ -20,6 +20,7 @@ pytestmark = pytest.mark.integration
 
 SCRIPTS = {
     "4821": [
+        calls(tool_use("get_order", {"order_id": 4821})),
         calls(tool_use("cancel_order", {"order_id": 4821})),
         text("Order #4821 is cancelled."),
     ],

@@ -60,6 +60,7 @@ def failed_checks(result: EvaluationResultRecord) -> dict[str, EvaluationCheckRe
 CORRECT_AGENT = ScriptedByMessage(
     {
         "4821": [
+            calls(tool_use("get_order", {"order_id": 4821})),
             calls(tool_use("cancel_order", {"order_id": 4821})),
             text("Order #4821 is cancelled."),
         ],
@@ -82,7 +83,7 @@ def test_correct_agent_passes_and_everything_is_stored() -> None:
     cancel = results["cancel-eligible-order"]
     assert cancel.final_status == "completed"
     assert cancel.judge_verdict == "pass" and cancel.judge_model == "fake-judge"
-    assert cancel.tool_calls == 1 and cancel.llm_calls == 3
+    assert cancel.tool_calls == 2 and cancel.llm_calls == 4  # lookup, cancel, reply + intent
     assert cancel.trace is not None
     assert (
         cancel.trace.initial_state and cancel.trace.initial_state["orders"]["4821"] == "processing"
@@ -90,6 +91,7 @@ def test_correct_agent_passes_and_everything_is_stored() -> None:
     assert cancel.trace.final_state and cancel.trace.final_state["orders"]["4821"] == "cancelled"
     assert {c.name for c in cancel.checks} >= {
         "tools.selection",
+        "tools.lookup_before_action",
         "state.expected",
         "judge.behavior",
     }

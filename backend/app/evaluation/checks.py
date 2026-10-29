@@ -212,6 +212,68 @@ def check_invalid_tool_calls(scenario: Scenario, run: ScenarioRun) -> list[Check
     return [CheckResult("tools.invalid_calls", Severity.MINOR, not mistakes, reason, [], mistakes)]
 
 
+# Tools that change a specific order. Before attempting one, the agent must have looked
+# that order up in the same execution, so it acts on what the system says about the order
+# rather than on the customer's description of it.
+ORDER_ACTIONS = frozenset({"cancel_order", "create_return"})
+
+
+def _shows_order(call: ToolCallRecord, order_id: Any) -> bool:
+    """A successful read-only call whose output includes this order."""
+    return (
+        call["name"] not in ORDER_ACTIONS
+        and call["status"] == "success"
+        and any(_loosely_equal(v, order_id) for v in _values_for(call["output"], "order_id"))
+    )
+
+
+def check_lookup_before_action(scenario: Scenario, run: ScenarioRun) -> list[CheckResult]:
+    """Every attempt at an order action comes after a lookup that returned that order.
+
+    Uses only the recorded order of tool calls: any earlier successful, non-action call
+    whose output contains the order (get_order, list_orders, an eligibility check)
+    counts. Attempts count whatever their outcome, because acting without looking is the
+    mistake even when a store rule then refuses the action. One result per tool and order.
+    """
+    calls = run.tool_calls
+    attempts: dict[tuple[str, str], list[int]] = {}
+    for position, call in enumerate(calls):
+        order_id = call["input"].get("order_id")
+        if call["name"] in ORDER_ACTIONS and order_id is not None:
+            attempts.setdefault((call["name"], str(order_id)), []).append(position)
+
+    results = []
+    for (tool, order_id), positions in attempts.items():
+        lookups = [i for i, c in enumerate(calls) if _shows_order(c, order_id)]
+        blind = [i for i in positions if not any(j < i for j in lookups)]
+        target = f"{tool}(order_id={order_id})"
+        actual = {
+            "attempts": [{"call": i + 1, **_view(calls[i])} for i in positions],
+            "lookups": [{"call": j + 1, "tool": calls[j]["name"]} for j in lookups],
+        }
+        if not blind:
+            reason = f"Order {order_id} was looked up (call {lookups[0] + 1}) before {target}."
+        elif lookups:
+            reason = (
+                f"{target} was attempted at call {blind[0] + 1} before order {order_id} was "
+                f"looked up (first lookup at call {lookups[0] + 1})."
+            )
+        else:
+            reason = f"{target} was attempted without ever looking up order {order_id}."
+        results.append(
+            CheckResult(
+                "tools.lookup_before_action",
+                Severity.MAJOR,
+                not blind,
+                reason,
+                f"a lookup returning order {order_id} before every {tool} attempt",
+                actual,
+                target,
+            )
+        )
+    return results
+
+
 # --- database state -------------------------------------------------------------------
 
 
@@ -392,6 +454,7 @@ DETERMINISTIC_CHECKS: tuple[Check, ...] = (
     check_required_tools,
     check_forbidden_tools,
     check_invalid_tool_calls,
+    check_lookup_before_action,
     check_expected_state,
     check_unexpected_changes,
     check_tool_output_privacy,

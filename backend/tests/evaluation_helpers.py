@@ -134,11 +134,21 @@ def make_run(
     )
 
 
+def order_lookup(order_id: int, status: str = "processing") -> dict[str, Any]:
+    return {"ok": True, "order": {"order_id": order_id, "status": status}}
+
+
 def correct_cancel_run(scenario: Scenario) -> ScenarioRun:
     return make_run(
         scenario,
         turns=[
-            turn("Order #4821 is cancelled.", tools=[tool_call("cancel_order", {"order_id": 4821})])
+            turn(
+                "Order #4821 is cancelled.",
+                tools=[
+                    tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821)),
+                    tool_call("cancel_order", {"order_id": 4821}),
+                ],
+            )
         ],
         final=snapshot({4821: OrderStatus.CANCELLED}),
     )

@@ -24,6 +24,7 @@ from tests.fakes import ScriptedByMessage, calls, text, tool_use
 pytestmark = pytest.mark.integration
 
 CANCEL_4821 = [
+    calls(tool_use("get_order", {"order_id": 4821})),
     calls(tool_use("cancel_order", {"order_id": 4821})),
     text("Order #4821 is cancelled."),
 ]
@@ -210,6 +211,22 @@ class TestComparison:
         assert [v["variant_id"] for v in regressions] == [SHIPPED]
         assert [r["id"] for r in listed] == [report["id"]]
         assert api.get("/comparisons", params={"baseline_run_id": candidate}).json() == []
+
+    def test_acting_before_looking_up_is_caught_as_a_regression(self, api: TestClient) -> None:
+        blind = {**GOOD, "4821": [calls(tool_use("cancel_order", {"order_id": 4821})),
+                                  text("Order #4821 is cancelled.")]}  # fmt: skip
+        baseline, candidate = test_run(api, GOOD), test_run(api, blind)
+
+        report = compare(api, baseline, candidate).json()
+
+        eligible = variant(report, "cancel-eligible-order:normal")
+        assert eligible["category"] == "regression"
+        assert eligible["new_failed_checks"] == [
+            "tools.lookup_before_action[cancel_order(order_id=4821)]"
+        ]
+        assert eligible["new_critical_failures"] == []  # major: the store rules still apply
+        codes = {r["code"]: r["level"] for r in report["gate"]["reasons"]}
+        assert codes["task_success_drop"] == "fail" and "new_critical_failures" not in codes
 
 
 class TestIncompatible:

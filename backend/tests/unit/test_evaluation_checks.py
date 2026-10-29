@@ -9,12 +9,17 @@ from tests.evaluation_helpers import (
     correct_cancel_run,
     make_run,
     make_scenario,
+    order_lookup,
     snapshot,
     tool_call,
     turn,
 )
 
 CANCEL = make_scenario()
+# The agent looking up the customer's orders, so later order actions aren't blind.
+LIST_BOTH = tool_call(
+    "list_orders", {}, output={"ok": True, "orders": [{"order_id": 4821}, {"order_id": 8821}]}
+)
 
 
 def named(checks: list[CheckResult], name: str) -> list[CheckResult]:
@@ -208,7 +213,12 @@ class TestRequiredTools:
         run = make_run(
             CANCEL,
             turns=[
-                turn(tools=[tool_call("cancel_order", {"order_id": 8821}, status="rejected")]),
+                turn(
+                    tools=[
+                        LIST_BOTH,
+                        tool_call("cancel_order", {"order_id": 8821}, status="rejected"),
+                    ]
+                ),
                 turn(tools=[tool_call("cancel_order", {"order_id": 4821})]),
             ],
             final=snapshot({4821: OrderStatus.CANCELLED}),
@@ -279,6 +289,7 @@ class TestInvalidToolCalls:
     def test_agent_mistakes_are_minor(self) -> None:
         calls = [
             tool_call("get_order", {"order_id": "abc"}, status="error", error="invalid_arguments"),
+            LIST_BOTH,
             tool_call("cancel_order", {"order_id": 4821}),
         ]
         run = make_run(
@@ -425,7 +436,7 @@ class TestResponse:
                 turn("Which order?", tools=[]),
                 turn(
                     "Order #4821 is cancelled.",
-                    tools=[tool_call("cancel_order", {"order_id": 4821})],
+                    tools=[LIST_BOTH, tool_call("cancel_order", {"order_id": 4821})],
                 ),
             ],
             final=snapshot({4821: OrderStatus.CANCELLED}),
@@ -504,3 +515,136 @@ def test_tool_reporting_success_without_changing_state_is_caught() -> None:
     assert only(checks, "tools.result").passed
     assert not only(checks, "state.expected").passed
     assert verdict_for(checks) == Verdict.FAIL
+
+
+class TestLookupBeforeAction:
+    @staticmethod
+    def checks_for(*calls: object, scenario: object = CANCEL) -> list[CheckResult]:
+        run = make_run(CANCEL, turns=[turn(tools=list(calls))])  # type: ignore[arg-type]
+        return named(evaluate_run(CANCEL, run), "tools.lookup_before_action")
+
+    def test_lookup_before_action_passes(self) -> None:
+        [check] = self.checks_for(
+            tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821)),
+            tool_call("cancel_order", {"order_id": 4821}),
+        )
+
+        assert check.passed and check.severity == Severity.MAJOR
+        assert check.target == "cancel_order(order_id=4821)"
+        assert check.actual["lookups"] == [{"call": 1, "tool": "get_order"}]
+
+    def test_action_before_lookup_fails_even_when_a_rule_refused_it(self) -> None:
+        [check] = self.checks_for(
+            tool_call("cancel_order", {"order_id": 8821}, status="rejected",
+                      output={"ok": False}, error="cancellation_not_allowed"),
+            tool_call("get_order", {"order_id": 8821}, output=order_lookup(8821, "shipped")),
+        )  # fmt: skip
+
+        assert not check.passed
+        assert check.reason == (
+            "cancel_order(order_id=8821) was attempted at call 1 before order 8821 was "
+            "looked up (first lookup at call 2)."
+        )
+        assert check.expected == "a lookup returning order 8821 before every cancel_order attempt"
+        assert check.actual["attempts"][0]["status"] == "rejected"
+
+    def test_action_without_any_lookup_fails(self) -> None:
+        [check] = self.checks_for(tool_call("cancel_order", {"order_id": 4821}))
+
+        assert not check.passed
+        assert (
+            check.reason
+            == "cancel_order(order_id=4821) was attempted without ever looking up order 4821."
+        )
+
+    def test_lookup_of_a_different_order_does_not_count(self) -> None:
+        [check] = self.checks_for(
+            tool_call("get_order", {"order_id": 9001}, output=order_lookup(9001)),
+            tool_call("cancel_order", {"order_id": 4821}),
+        )
+
+        assert not check.passed and check.actual["lookups"] == []
+
+    def test_failed_lookup_does_not_count(self) -> None:
+        [check] = self.checks_for(
+            tool_call("get_order", {"order_id": 4821}, status="error", error="tool_unavailable"),
+            tool_call("cancel_order", {"order_id": 4821}),
+        )
+
+        assert not check.passed
+
+    def test_list_and_eligibility_lookups_count_when_they_return_the_order(self) -> None:
+        listed = {"ok": True, "orders": [{"order_id": 9001}, {"order_id": 4821}]}
+        eligibility = {"ok": True, "eligible": True, "order_id": "5532"}
+
+        checks = self.checks_for(
+            tool_call("list_orders", {}, output=listed),
+            tool_call("cancel_order", {"order_id": 4821}),
+            tool_call("check_refund_eligibility", {"order_id": 5532}, output=eligibility),
+            tool_call("create_return", {"order_id": "5532"}),
+        )
+
+        assert [(c.target, c.passed) for c in checks] == [
+            ("cancel_order(order_id=4821)", True),
+            ("create_return(order_id=5532)", True),
+        ]
+
+    def test_an_action_does_not_count_as_a_lookup_of_its_own_order(self) -> None:
+        refused = {"ok": False, "error": "approval_required", "order_id": 7420}
+
+        checks = self.checks_for(
+            tool_call("create_return", {"order_id": 7420}, status="rejected", output=refused),
+            tool_call("create_return", {"order_id": 7420}),
+        )
+
+        assert [c.passed for c in checks] == [False]
+
+    def test_every_repeated_attempt_must_follow_a_lookup(self) -> None:
+        # A blind first attempt isn't excused by a lookup before the retry.
+        [blind_first] = self.checks_for(
+            tool_call("cancel_order", {"order_id": 4821}, status="error", error="tool_unavailable"),
+            tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821)),
+            tool_call("cancel_order", {"order_id": 4821}),
+        )
+        [looked_first] = self.checks_for(
+            tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821)),
+            tool_call("cancel_order", {"order_id": 4821}, status="error", error="tool_unavailable"),
+            tool_call("cancel_order", {"order_id": 4821}),
+        )
+
+        assert not blind_first.passed and len(blind_first.actual["attempts"]) == 2
+        assert looked_first.passed and len(looked_first.actual["attempts"]) == 2
+
+    def test_lookup_in_an_earlier_turn_counts(self) -> None:
+        run = make_run(
+            CANCEL,
+            turns=[
+                turn(tools=[tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821))]),
+                turn(tools=[tool_call("cancel_order", {"order_id": 4821})]),
+            ],
+        )
+
+        [check] = named(evaluate_run(CANCEL, run), "tools.lookup_before_action")
+
+        assert check.passed
+
+    def test_no_order_action_means_no_result(self) -> None:
+        checks = self.checks_for(
+            tool_call("get_order", {"order_id": 4821}, output=order_lookup(4821)),
+            tool_call("check_refund_eligibility", {"order_id": 4821}),
+        )
+
+        assert checks == []
+
+    def test_blind_action_fails_the_variant(self) -> None:
+        run = make_run(
+            CANCEL,
+            turns=[turn("Order #4821 is cancelled.",
+                        tools=[tool_call("cancel_order", {"order_id": 4821})])],
+            final=snapshot({4821: OrderStatus.CANCELLED}),
+        )  # fmt: skip
+
+        checks = evaluate_run(CANCEL, run)
+
+        assert failed(checks) == {"tools.lookup_before_action"}
+        assert verdict_for(checks) == Verdict.FAIL

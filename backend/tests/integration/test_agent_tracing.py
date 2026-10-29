@@ -141,7 +141,11 @@ def test_evaluation_and_judge_are_appended_to_the_same_trace() -> None:
         SCENARIOS["cancel-eligible-order"],
         Persona.NORMAL,
         llm=FakeLLM(
-            [calls(tool_use("cancel_order", {"order_id": 4821})), text("Order #4821 cancelled.")]
+            [
+                calls(tool_use("get_order", {"order_id": 4821})),
+                calls(tool_use("cancel_order", {"order_id": 4821})),
+                text("Order #4821 cancelled."),
+            ]
         ),
         config=FAST,
     )

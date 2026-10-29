@@ -34,6 +34,7 @@ failed.
 | `response.must_not_mention` | critical | The reply contains text that must never be shown (e.g. another customer's product) |
 | `response.must_mention` | major | The reply is missing a required fact (e.g. the order number) |
 | `intent` | minor | The first turn's intent label is wrong |
+| `tools.lookup_before_action` | major | An order action (`cancel_order`, `create_return`) was attempted before any successful lookup that returned that order (e.g. `get_order`, `list_orders`, an eligibility check) in the same execution. Every attempt counts, including ones a store rule refused. One result per tool and order; nothing is reported when no order action happens |
 | `tools.invalid_calls` | minor | The agent made invalid, unknown or repeated tool calls (outages don't count) |
 | `faults.exercised` | minor | A configured fault never fired, so the scenario didn't test what it says |
 
