@@ -8,7 +8,7 @@ Architecture and design decisions: [docs/architecture/phase-0-overview.md](docs/
 
 ## Local development
 
-Requirements: Python 3.12+, Docker.
+Requirements: Python 3.12+, Node.js 20+, Docker.
 
 ```bash
 # 1. Configure the backend (then set a real POSTGRES_PASSWORD and matching DATABASE_URL)
@@ -32,6 +32,20 @@ python3 -m venv .venv
 - API docs: http://localhost:8000/docs
 - Liveness: `GET /health`
 - Readiness (checks the database): `GET /health/ready`
+
+## Dashboard
+
+A React + TypeScript dashboard for runs, scenario results, traces, regression reports,
+approvals and agent versions. It shows only what the API returns. With the API running:
+
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:5173 (proxies /api to http://localhost:8000)
+npm test        # plus: npm run lint, npm run typecheck, npm run build
+```
+
+See [frontend/README.md](frontend/README.md) for the structure and design tokens.
 
 ## Checks
 
