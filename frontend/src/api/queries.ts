@@ -74,10 +74,11 @@ export function useScenarios() {
   });
 }
 
-export function useScenario(id: string) {
+export function useScenario(id: string | undefined) {
   return useQuery({
     queryKey: ["scenarios", id],
-    queryFn: () => api.get<ScenarioDetail>(`/scenarios/${encodeURIComponent(id)}`),
+    queryFn: () => api.get<ScenarioDetail>(`/scenarios/${encodeURIComponent(id ?? "")}`),
+    enabled: Boolean(id),
   });
 }
 
@@ -108,10 +109,11 @@ export function useTraceEvents(executionId: string) {
   });
 }
 
-export function useTraceToolCalls(executionId: string) {
+export function useTraceToolCalls(executionId: string | undefined) {
   return useQuery({
     queryKey: ["traces", executionId, "tool-calls"],
-    queryFn: () => api.get<ToolCallView[]>(`/traces/${executionId}/tool-calls`),
+    queryFn: () => api.get<ToolCallView[]>(`/traces/${executionId ?? ""}/tool-calls`),
+    enabled: Boolean(executionId),
   });
 }
 

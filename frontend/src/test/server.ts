@@ -3,7 +3,8 @@ import { setupServer } from "msw/node";
 
 export const API = "http://lab.test/api";
 
-export const server = setupServer();
+// The sidebar asks for pending approvals on every page; tests override this when it matters.
+export const server = setupServer(http.get(`${API}/approvals`, () => HttpResponse.json([])));
 
 /** Answer GET `path` with `body` (and optionally a status). */
 export function get(path: string, body: JsonBodyType, status = 200) {

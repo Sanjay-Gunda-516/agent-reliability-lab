@@ -59,6 +59,8 @@ interface QueryStateProps<T> {
   emptyMessage?: string;
   emptyHint?: ReactNode;
   loadingRows?: number;
+  /** Pad the loading and error states, for use inside edge-to-edge panels. */
+  padded?: boolean;
 }
 
 /** Loading, error and empty handling for one query, in one consistent style. */
@@ -69,9 +71,12 @@ export function QueryState<T>({
   emptyMessage = "Nothing here yet.",
   emptyHint,
   loadingRows,
+  padded,
 }: QueryStateProps<T>) {
-  if (query.isPending) return <LoadingState rows={loadingRows} />;
-  if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  const pad = (node: ReactNode) => (padded ? <div className="p-5">{node}</div> : node);
+  if (query.isPending) return pad(<LoadingState rows={loadingRows} />);
+  if (query.isError)
+    return pad(<ErrorState error={query.error} onRetry={() => void query.refetch()} />);
   if (isEmpty?.(query.data)) return <EmptyState message={emptyMessage} hint={emptyHint} />;
   return <>{children(query.data)}</>;
 }
