@@ -29,5 +29,6 @@ beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   cleanup();
+  localStorage.clear(); // e.g. the remembered reviewer name
 });
 afterAll(() => server.close());

@@ -1,6 +1,8 @@
 import type { RouteObject } from "react-router";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { AgentVersions } from "@/pages/AgentVersions";
+import { Approvals } from "@/pages/Approvals";
 import { NotFound } from "@/pages/NotFound";
 import { Overview } from "@/pages/Overview";
 import { RegressionDetail, RegressionList } from "@/pages/Regression";
@@ -25,6 +27,8 @@ export const routes: RouteObject[] = [
       { path: "traces/:executionId", element: <TraceDetail /> },
       { path: "regression", element: <RegressionList /> },
       { path: "regression/:reportId", element: <RegressionDetail /> },
+      { path: "approvals", element: <Approvals /> },
+      { path: "versions", element: <AgentVersions /> },
       { path: "*", element: <NotFound /> },
     ],
   },
