@@ -43,9 +43,12 @@ def _seed_if_empty() -> bool:
 
 def migrate() -> None:
     settings = get_settings()
-    # Its own connection without the app's statement timeout: waiting for another
-    # runner to finish can take longer than any single query should.
-    lock_engine = create_engine(settings.database_url, poolclass=NullPool)
+    # Its own connection, without the app's statement timeout (waiting for another runner
+    # can take longer than any query should) and in autocommit: an open transaction here
+    # would block LangGraph's CREATE INDEX CONCURRENTLY forever.
+    lock_engine = create_engine(
+        settings.database_url, poolclass=NullPool, isolation_level="AUTOCOMMIT"
+    )
     with lock_engine.connect() as lock:
         logger.info("Waiting for the migration lock")
         lock.execute(text("SELECT pg_advisory_lock(:id)"), {"id": MIGRATION_LOCK_ID})
@@ -61,7 +64,6 @@ def migrate() -> None:
                 logger.info("Seeded the demo store")
         finally:
             lock.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": MIGRATION_LOCK_ID})
-            lock.commit()
 
 
 def main() -> int:

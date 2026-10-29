@@ -4,14 +4,16 @@ import threading
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, func, inspect, make_url, select, text
 from sqlalchemy.pool import NullPool
 
 from app import migrate as migrate_module
+from app.agent.checkpoints import LANGGRAPH_TABLES
 from app.config import get_settings
 from app.db.models import Customer, Order
 from app.db.session import get_sessionmaker
 from app.seed import reset_demo_data
+from tests.integration.conftest import recreate_database, reset_cached_db_objects
 
 pytestmark = pytest.mark.integration
 
@@ -52,7 +54,7 @@ def test_waits_for_another_runner_instead_of_racing() -> None:
     finished = threading.Event()
     with holder.connect() as conn:
         conn.execute(text("SELECT pg_advisory_lock(:id)"), {"id": migrate_module.MIGRATION_LOCK_ID})
-        runner = threading.Thread(target=lambda: (migrate_module.main(), finished.set()))
+        runner = threading.Thread(target=lambda: (migrate_module.main(), finished.set()), daemon=True)
         runner.start()
         # Longer than the app's 5 s statement timeout would allow, had it applied.
         assert not finished.wait(6)
@@ -72,3 +74,27 @@ def test_failure_exits_non_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(migrate_module.command, "upgrade", broken)
 
     assert migrate_module.main() == 1
+
+
+def test_prepares_a_brand_new_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real first start: no tables at all, so LangGraph's setup creates its indexes
+    # (CREATE INDEX CONCURRENTLY), which must not wait on our own lock connection.
+    test_url = make_url(get_settings().database_url)
+    fresh = test_url.set(database=f"{test_url.database}_fresh")
+    recreate_database(test_url, fresh.database or "")
+    monkeypatch.setenv("DATABASE_URL", fresh.render_as_string(hide_password=False))
+    reset_cached_db_objects()
+    result: list[int] = []
+    try:
+        runner = threading.Thread(target=lambda: result.append(migrate_module.main()), daemon=True)
+        runner.start()
+        runner.join(timeout=60)
+        assert result == [0], "migrate hung or failed on an empty database"
+        engine = create_engine(fresh, poolclass=NullPool)
+        tables = set(inspect(engine).get_table_names())
+        assert LANGGRAPH_TABLES <= tables and {"customers", "test_runs"} <= tables
+        assert customers() > 0
+        engine.dispose()
+    finally:
+        monkeypatch.undo()
+        reset_cached_db_objects()
