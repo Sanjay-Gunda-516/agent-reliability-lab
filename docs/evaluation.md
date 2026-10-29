@@ -110,3 +110,6 @@ cd backend
 Or through the API: `POST /test-runs` (202, runs in the background), then
 `GET /test-runs/{id}`, `/results`, `/results/{variant_id}`, `/failed-checks` and
 `/metrics`.
+
+Comparing two runs, and gating a candidate agent version on the result, is covered in
+[regression.md](regression.md).

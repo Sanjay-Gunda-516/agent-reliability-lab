@@ -218,7 +218,9 @@ class TestGate:
     def test_custom_cost_and_latency_thresholds(self) -> None:
         base = passing(2, latency_ms=1000.0)
         cand = passing(2, cost=Decimal("0.0105"), latency_ms=1060.0)
-        tight = GateThresholds(max_cost_increase_pct=Decimal(1), max_latency_increase_pct=Decimal(5))
+        tight = GateThresholds(
+            max_cost_increase_pct=Decimal(1), max_latency_increase_pct=Decimal(5)
+        )
 
         assert codes(compare(base, cand, tight)) == {
             "cost_increase": "warn",
@@ -320,9 +322,7 @@ class TestReruns:
         assert evidence.outcome == Category.NOISY
 
     def test_reruns_against_changed_scenario_content_are_not_counted(self) -> None:
-        evidence = assess_reruns(
-            v(), fail(), candidate_reruns=[fail(run=2, scenario_hash="h2")]
-        )
+        evidence = assess_reruns(v(), fail(), candidate_reruns=[fail(run=2, scenario_hash="h2")])
 
         assert evidence.outcome == Category.REGRESSION
         assert evidence.candidate[0].counted is False and evidence.candidate_counted == 0

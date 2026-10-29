@@ -66,6 +66,16 @@ Test scenarios for the agent live in `backend/scenarios/*.yaml`. See
 Every agent execution is traced (`GET /traces/{execution_id}`), logs carry correlation
 ids, and LangSmith tracing is optional. See [docs/observability.md](docs/observability.md).
 
+## Regression testing
+
+Compare a candidate agent version with a baseline on the same scenarios. A deterministic
+gate fails on new critical failures or a task-success drop, and flipped variants can be
+rerun to tell noise from real regressions. See [docs/regression.md](docs/regression.md).
+
+```bash
+.venv/bin/python -m app.evaluation compare <baseline-run> <candidate-run>   # exit 1 on fail
+```
+
 ## Human approvals
 
 Refunds over $500 pause the conversation until a support team member approves or
