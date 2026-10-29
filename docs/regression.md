@@ -29,8 +29,10 @@ records each label as a version "known only from old runs" (`defined_in_code = f
 ## Pairing and categories
 
 Results from the two runs are paired by variant id (e.g. `cancel-shipped-order:normal`).
-Every result stores the content hash of the scenario it was graded against. If the two
-hashes differ, the test itself changed and the difference isn't blamed on the agent.
+Every result stores the content hash of the scenario it was graded against, and the
+version of the deterministic check set that graded it. A pair is only compared when
+both match and the check-set version is known. Otherwise the test or the grading
+changed, and the difference isn't blamed on the agent.
 
 | Category | Meaning | Counted by the gate |
 |---|---|---|
@@ -40,6 +42,7 @@ hashes differ, the test itself changed and the difference isn't blamed on the ag
 | `unchanged` | Same verdict and same critical failures | yes |
 | `noisy` | Reruns disagreed with the first observation | no |
 | `scenario_changed` | Scenario content hash differs between the runs | no |
+| `checks_changed` | Graded by different check-set versions, or by an unknown one (results from before versioning) | no |
 | `missing_in_candidate` / `new_in_candidate` | Only one run has the variant | no |
 
 Each variant row also lists newly failing and fixed checks of every severity, its
@@ -76,6 +79,7 @@ There are also warnings for:
 - regressions seen only once (rerun recommended);
 - noisy variants;
 - changed scenarios;
+- results graded by different or unknown check sets;
 - baseline variants the candidate didn't run;
 - cost that can't be estimated (a model with no known price).
 
@@ -108,10 +112,32 @@ failures, whether it was counted), the counts, and the explanation.
 | `improvement` | Stays `improvement` under the mirrored rule, otherwise `noisy` |
 | `unchanged` | `noisy` if any rerun differs |
 
-Reruns graded against different scenario content are recorded but not counted. Noisy
+Reruns graded against different scenario content, or by a different check set, are
+recorded but not counted. Noisy
 variants drop out of the gate and are listed as a warning. Reruns call Claude: the API
 and the CLI estimate the cost from what the same variants cost in the original runs, and
 the CLI asks before it starts.
+
+## Check-set versions
+
+`CHECK_SET_VERSION` in [`app/evaluation/checks.py`](../backend/app/evaluation/checks.py)
+names the deterministic grading rules:
+
+| Version | What it is |
+|---|---|
+| `checks-v1` | The original Phase 5 checks |
+| `checks-v2` | Adds `tools.lookup_before_action` |
+
+Results stored before check sets were versioned have a null version, shown as
+`unknown`. Every test run (`test_runs.check_set_version`) and every result
+(`evaluation_results.check_set_version`) records the version that graded it. Reports
+list the versions found on each side, and each variant row stores both of its versions.
+The version is shown in `/test-runs`, `/test-runs/{id}/results`, `/comparisons` and the
+CLI's `show`, `compare` and `report`.
+
+The version is bumped by hand whenever a change could alter a check result or verdict.
+A fingerprint test over `checks.py` and `results.py` fails on any edit to them, so every
+change to the grading code comes with an explicit decision about the version.
 
 ## API
 

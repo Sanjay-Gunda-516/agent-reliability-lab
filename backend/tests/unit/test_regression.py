@@ -34,6 +34,7 @@ def v(
     latency_ms: float = 1000.0,
     cost: Decimal | None = Decimal("0.010"),
     scenario_hash: str = "h1",
+    checks_version: str | None = "checks-v2",
     tags: list[str] | None = None,
     has_faults: bool = False,
     run: int = 1,
@@ -50,6 +51,7 @@ def v(
         cost_usd=cost,
         scenario_id=variant_id.split(":")[0],
         scenario_hash=scenario_hash,
+        check_set_version=checks_version,
         result_id=hash((variant_id, run)) % 10_000,
         test_run_id=run,
     )
@@ -125,6 +127,26 @@ class TestVariantCategories:
         # Excluded from the metrics too: the only gated variant passes on both sides.
         assert result.baseline_metrics.variants == result.candidate_metrics.variants == 1
         assert codes(result) == {"scenario_changed": "warn"}
+
+    def test_different_check_sets_are_not_compared(self) -> None:
+        result = compare(
+            [v(checks_version="checks-v1"), v("t:normal")],
+            [fail(), v("t:normal")],
+        )
+
+        changed = result.variants[0]
+        assert changed.category == Category.CHECKS_CHANGED and not changed.gated
+        assert "checks-v1 → checks-v2" in changed.explanation
+        assert codes(result) == {"checks_changed": "warn"}
+        assert result.baseline_check_set_versions == ["checks-v1", "checks-v2"]
+
+    def test_unknown_check_set_is_never_compared(self) -> None:
+        result = compare([v(checks_version=None)], [v(checks_version=None)])
+
+        assert result.variants[0].category == Category.CHECKS_CHANGED
+        assert "unknown → unknown" in result.variants[0].explanation
+        assert result.gate.status == "fail"  # nothing left to gate
+        assert result.candidate_check_set_versions == [None]
 
     def test_variants_on_one_side_only(self) -> None:
         result = compare([v("a:normal"), v("b:normal")], [v("b:normal"), v("c:normal")])
@@ -326,6 +348,14 @@ class TestReruns:
 
         assert evidence.outcome == Category.REGRESSION
         assert evidence.candidate[0].counted is False and evidence.candidate_counted == 0
+
+    def test_reruns_graded_by_other_checks_are_not_counted(self) -> None:
+        evidence = assess_reruns(
+            v(), fail(), candidate_reruns=[fail(run=2, checks_version="checks-v3")]
+        )
+
+        assert evidence.outcome == Category.REGRESSION and evidence.candidate_counted == 0
+        assert evidence.candidate[0].check_set_version == "checks-v3"
 
     def test_evidence_reclassifies_and_noise_leaves_the_gate(self) -> None:
         base = passing(10)

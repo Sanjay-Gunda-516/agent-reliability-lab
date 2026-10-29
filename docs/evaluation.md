@@ -114,3 +114,7 @@ Or through the API: `POST /test-runs` (202, runs in the background), then
 
 Comparing two runs, and gating a candidate agent version on the result, is covered in
 [regression.md](regression.md).
+
+The deterministic checks are versioned (`CHECK_SET_VERSION`, currently `checks-v2`),
+and every run and result records the version that graded it; see
+[regression.md](regression.md#check-set-versions).

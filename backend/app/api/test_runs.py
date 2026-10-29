@@ -49,6 +49,7 @@ class TestRunSummary(BaseModel):
     status: str
     agent_version: str
     judge_model: str | None
+    check_set_version: str | None  # null for runs graded before check sets were versioned
     variant_count: int
     error: str | None
     rerun_id: int | None  # set for runs that repeat variants for a regression rerun
@@ -73,6 +74,7 @@ class ResultSummary(BaseModel):
     scenario_id: str
     persona: str
     verdict: str
+    check_set_version: str | None
     critical_failures: int
     major_failures: int
     minor_failures: int

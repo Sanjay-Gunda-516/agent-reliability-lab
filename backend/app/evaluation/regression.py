@@ -5,6 +5,9 @@ results were graded against the same scenario content (hash); otherwise the test
 changed. Each variant gets a category, aggregate metrics are compared over the variants
 the gate counts, and the gate applies fixed, configurable thresholds.
 
+Results graded by different versions of the deterministic checks (or by an unknown
+version) aren't compared either: the rules changed, not necessarily the agent.
+
 One run per variant is noisy, so a flip seen once is a `regression` (or `improvement`)
 that a rerun can turn into `confirmed_regression` or `noisy`. Rerun evidence is passed in
 here; this module never runs anything itself.
@@ -29,6 +32,7 @@ class Category(StrEnum):
     UNCHANGED = "unchanged"
     NOISY = "noisy"  # reruns disagree with the first observation; not gated
     SCENARIO_CHANGED = "scenario_changed"  # the test changed, not (only) the agent
+    CHECKS_CHANGED = "checks_changed"  # graded by different (or unknown) check sets
     MISSING_IN_CANDIDATE = "missing_in_candidate"
     NEW_IN_CANDIDATE = "new_in_candidate"
 
@@ -55,7 +59,8 @@ class Observation(BaseModel):
     verdict: Verdict
     critical_failures: list[str]
     scenario_hash: str
-    counted: bool  # False when graded against different scenario content
+    check_set_version: str | None = None
+    counted: bool  # False when graded against different scenario content or checks
     reproduces: bool | None = None  # does it repeat the change being checked?
 
 
@@ -83,6 +88,8 @@ class VariantComparison(BaseModel):
     candidate_verdict: Verdict | None
     baseline_scenario_hash: str | None
     candidate_scenario_hash: str | None
+    baseline_check_set_version: str | None
+    candidate_check_set_version: str | None
     new_critical_failures: list[str]
     resolved_critical_failures: list[str]
     new_failed_checks: list[str]
@@ -118,6 +125,8 @@ class GateResult(BaseModel):
 
 
 class Comparison(BaseModel):
+    baseline_check_set_versions: list[str | None]
+    candidate_check_set_versions: list[str | None]
     variants: list[VariantComparison]
     counts: dict[str, int]
     metric_deltas: list[MetricDelta]
@@ -160,14 +169,24 @@ def _differs(observed: VariantSummary, reference: VariantSummary) -> bool:
     ) != _failed(reference, critical_only=True)
 
 
-def _observation(summary: VariantSummary, reference_hash: str) -> Observation:
+def comparable(a: VariantSummary, b: VariantSummary) -> bool:
+    """Graded against the same scenario content by the same, known check set."""
+    return (
+        a.scenario_hash == b.scenario_hash
+        and a.check_set_version is not None
+        and a.check_set_version == b.check_set_version
+    )
+
+
+def _observation(summary: VariantSummary, reference: VariantSummary) -> Observation:
     return Observation(
         test_run_id=summary.test_run_id,
         result_id=summary.result_id,
         verdict=summary.verdict,
         critical_failures=sorted(_failed(summary, critical_only=True)),
         scenario_hash=summary.scenario_hash,
-        counted=summary.scenario_hash == reference_hash,
+        check_set_version=summary.check_set_version,
+        counted=comparable(summary, reference),
     )
 
 
@@ -197,7 +216,8 @@ def assess_reruns(
     baseline fails the same way just as often, the variant is flaky rather than the
     candidate being worse. Otherwise the change is noisy. Improvements are judged the
     same way, mirrored. A variant that was unchanged becomes noisy if any rerun differs.
-    Reruns graded against different scenario content are recorded but not counted.
+    Reruns graded against different scenario content, or by a different check set, are
+    recorded but not counted.
     """
     first = _first_category(baseline, candidate)
     changed: Callable[[VariantSummary, VariantSummary], bool] = {
@@ -211,7 +231,7 @@ def assess_reruns(
     def observe(runs: Iterable[VariantSummary], reference: VariantSummary) -> list[Observation]:
         observations = []
         for summary in runs:
-            observation = _observation(summary, baseline.scenario_hash)
+            observation = _observation(summary, baseline)
             if observation.counted:
                 observation.reproduces = changed(summary, reference)
             observations.append(observation)
@@ -226,7 +246,10 @@ def assess_reruns(
 
     if n == 0:
         outcome = first
-        explanation = "No rerun was graded against the same scenario content, so nothing changed."
+        explanation = (
+            "No rerun was graded against the same scenario content and check set, so "
+            "nothing changed."
+        )
     elif first == Category.UNCHANGED:
         outcome = Category.NOISY if r or d else Category.UNCHANGED
         explanation = (
@@ -296,6 +319,8 @@ def _compare_variant(
         "candidate_verdict": candidate.verdict if candidate else None,
         "baseline_scenario_hash": baseline.scenario_hash if baseline else None,
         "candidate_scenario_hash": candidate.scenario_hash if candidate else None,
+        "baseline_check_set_version": baseline.check_set_version if baseline else None,
+        "candidate_check_set_version": candidate.check_set_version if candidate else None,
         "new_critical_failures": [],
         "resolved_critical_failures": [],
         "new_failed_checks": [],
@@ -328,6 +353,17 @@ def _compare_variant(
                 "The scenario's content changed between the runs "
                 f"({baseline.scenario_hash[:8]} → {candidate.scenario_hash[:8]}), so the "
                 "difference isn't attributed to the agent."
+            ),
+        )
+    if not comparable(baseline, candidate):
+        versions = f"{baseline.check_set_version or 'unknown'} → "
+        versions += candidate.check_set_version or "unknown"
+        return VariantComparison(
+            **fields,
+            category=Category.CHECKS_CHANGED,
+            explanation=(
+                f"The results were graded by different or unknown check sets ({versions}), "
+                "so they can't be compared."
             ),
         )
 
@@ -513,6 +549,8 @@ def evaluate_gate(
          "are left out of the gate"),
         (Category.SCENARIO_CHANGED, "scenario_changed", "variant(s) were left out because "
          "their scenario changed between the runs"),
+        (Category.CHECKS_CHANGED, "checks_changed", "variant(s) were left out because they "
+         "were graded by different or unknown check sets"),
         (Category.MISSING_IN_CANDIDATE, "missing_in_candidate", "baseline variant(s) were not "
          "run by the candidate"),
     ]:  # fmt: skip
@@ -583,6 +621,12 @@ _PAIRED = frozenset(
 )
 
 
+def _versions(summaries: list[VariantSummary]) -> list[str | None]:
+    known = sorted({s.check_set_version for s in summaries if s.check_set_version is not None})
+    unknown = any(s.check_set_version is None for s in summaries)
+    return [*known, *([None] if unknown else [])]
+
+
 def compare(
     baseline: list[VariantSummary],
     candidate: list[VariantSummary],
@@ -602,6 +646,8 @@ def compare(
     gated_cand = [cand_by_id[i] for i in gated_ids]
     base_metrics, cand_metrics = compute_metrics(gated_base), compute_metrics(gated_cand)
     return Comparison(
+        baseline_check_set_versions=_versions(baseline),
+        candidate_check_set_versions=_versions(candidate),
         variants=variants,
         counts={str(c): sum(v.category == c for v in variants) for c in Category},
         metric_deltas=metric_deltas(base_metrics, cand_metrics),

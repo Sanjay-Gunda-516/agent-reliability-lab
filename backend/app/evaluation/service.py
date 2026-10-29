@@ -13,6 +13,7 @@ from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient
 from app.agent.versions import DEFAULT_AGENT_VERSION, get_version, sync_agent_versions
 from app.db.lab_models import ScenarioRecord, TestRunRecord
+from app.evaluation.checks import CHECK_SET_VERSION
 from app.evaluation.evaluate import EvaluatedVariant, evaluate_variant
 from app.evaluation.judge import Judge
 from app.evaluation.metrics import compute_metrics
@@ -98,6 +99,7 @@ def create_test_run(
         agent_version=agent_version,
         agent_config=dataclasses.asdict(config),
         judge_model=judge_model,
+        check_set_version=CHECK_SET_VERSION,
         selection=selection.model_dump(mode="json"),
         variant_count=len(cases),
         rerun_id=rerun_id,
@@ -129,6 +131,7 @@ def execute_test_run(
             raise ValueError(f"test run {test_run_id} not found")
         run.status = "running"
         run.started_at = datetime.now(UTC)
+        run.check_set_version = CHECK_SET_VERSION  # the checks that will grade it
         db.commit()
 
         try:

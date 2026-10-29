@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.lab_models import EvaluationCheckRecord, EvaluationResultRecord
+from app.evaluation.checks import CHECK_SET_VERSION
 from app.evaluation.evaluate import EvaluatedVariant
 from app.evaluation.metrics import TokenTotals, VariantSummary
 from app.evaluation.results import CheckResult, CheckSource, Severity, Verdict
@@ -88,6 +89,7 @@ def save_result(
         variant_id=run.variant_id,
         persona=str(run.persona),
         scenario_hash=run.scenario_hash,
+        check_set_version=CHECK_SET_VERSION,
         verdict=str(evaluated.verdict),
         critical_failures=_failures(evaluated.checks, Severity.CRITICAL),
         major_failures=_failures(evaluated.checks, Severity.MAJOR),
@@ -175,6 +177,7 @@ def load_summaries(db: Session, test_run_id: int) -> list[VariantSummary]:
             judge_cost_usd=r.judge_cost_usd,
             scenario_id=r.scenario_id,
             scenario_hash=r.scenario_hash,
+            check_set_version=r.check_set_version,
             result_id=r.id,
             test_run_id=r.test_run_id,
         )

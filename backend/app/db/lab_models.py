@@ -87,6 +87,8 @@ class TestRunRecord(Base):
     agent_version: Mapped[str] = mapped_column(ForeignKey("agent_versions.name"), index=True)
     agent_config: Mapped[dict[str, Any]] = mapped_column(JSONB)
     judge_model: Mapped[str | None] = mapped_column(String(50))
+    # Deterministic check set the run's results are graded with (null: before versioning).
+    check_set_version: Mapped[str | None] = mapped_column(String(20))
     selection: Mapped[dict[str, Any]] = mapped_column(JSONB)
     variant_count: Mapped[int]
     # Snapshot computed from evaluation_results when the run finishes.
@@ -119,6 +121,7 @@ class EvaluationResultRecord(Base):
     variant_id: Mapped[str] = mapped_column(ForeignKey("scenario_variants.id"))
     persona: Mapped[str] = mapped_column(String(20))
     scenario_hash: Mapped[str] = mapped_column(String(64))
+    check_set_version: Mapped[str | None] = mapped_column(String(20))  # null: before versioning
     verdict: Mapped[str] = mapped_column(String(10))  # pass | fail | error
     critical_failures: Mapped[int]
     major_failures: Mapped[int]
@@ -315,6 +318,9 @@ class RegressionReportRecord(Base):
     candidate_run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id"), index=True)
     baseline_agent_version: Mapped[str] = mapped_column(String(50))
     candidate_agent_version: Mapped[str] = mapped_column(String(50))
+    # Check sets that graded each run (the distinct values found in its results).
+    baseline_check_set_versions: Mapped[list[str | None]] = mapped_column(JSONB, default=list)
+    candidate_check_set_versions: Mapped[list[str | None]] = mapped_column(JSONB, default=list)
     revision: Mapped[int]  # 1 for the original comparison
     root_report_id: Mapped[int | None] = mapped_column(ForeignKey("regression_reports.id"))
     rerun_id: Mapped[int | None] = mapped_column(ForeignKey("regression_reruns.id"))
@@ -344,7 +350,7 @@ class RegressionVariantRecord(Base):
     variant_id: Mapped[str] = mapped_column(String(120))
     scenario_id: Mapped[str] = mapped_column(String(80))
     # regression | confirmed_regression | improvement | unchanged | noisy | scenario_changed
-    # | missing_in_candidate | new_in_candidate
+    # | checks_changed | missing_in_candidate | new_in_candidate
     category: Mapped[str] = mapped_column(String(30), index=True)
     gated: Mapped[bool]  # counted by the gate (paired, same scenario content, not noisy)
     needs_rerun: Mapped[bool]
@@ -354,6 +360,8 @@ class RegressionVariantRecord(Base):
     candidate_verdict: Mapped[str | None] = mapped_column(String(10))
     baseline_scenario_hash: Mapped[str | None] = mapped_column(String(64))
     candidate_scenario_hash: Mapped[str | None] = mapped_column(String(64))
+    baseline_check_set_version: Mapped[str | None] = mapped_column(String(20))
+    candidate_check_set_version: Mapped[str | None] = mapped_column(String(20))
     new_critical_failures: Mapped[list[str]] = mapped_column(JSONB)
     resolved_critical_failures: Mapped[list[str]] = mapped_column(JSONB)
     new_failed_checks: Mapped[list[str]] = mapped_column(JSONB)

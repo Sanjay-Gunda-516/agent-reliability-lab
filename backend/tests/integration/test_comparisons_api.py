@@ -18,6 +18,7 @@ from app.db.lab_models import (
 )
 from app.db.session import get_sessionmaker
 from app.evaluation import __main__ as cli
+from app.evaluation.checks import CHECK_SET_VERSION
 from app.main import app
 from tests.fakes import ScriptedByMessage, calls, text, tool_use
 
@@ -142,7 +143,9 @@ class TestComparison:
 
         assert gate["status"] == "fail"
         assert gate["thresholds"]["max_task_success_drop_pp"] == "5"
-        assert gate["text"].splitlines()[1] == "GATE: FAIL"
+        lines = gate["text"].splitlines()
+        assert lines[1] == "Check sets: baseline checks-v2, candidate checks-v2"
+        assert lines[2] == "GATE: FAIL"
         assert "[FAIL] new_critical_failures" in gate["text"]
         assert f"regression            {SHIPPED}" in gate["text"]
 
@@ -227,6 +230,62 @@ class TestComparison:
         assert eligible["new_critical_failures"] == []  # major: the store rules still apply
         codes = {r["code"]: r["level"] for r in report["gate"]["reasons"]}
         assert codes["task_success_drop"] == "fail" and "new_critical_failures" not in codes
+
+    def test_check_set_versions_are_recorded_and_exposed(self, api: TestClient) -> None:
+        baseline, candidate, report = regressed_pair(api)
+
+        run = api.get(f"/test-runs/{baseline}").json()
+        results = api.get(f"/test-runs/{candidate}/results").json()
+
+        assert run["check_set_version"] == CHECK_SET_VERSION
+        assert {r["check_set_version"] for r in results} == {CHECK_SET_VERSION}
+        assert report["baseline_check_set_versions"] == [CHECK_SET_VERSION]
+        assert report["candidate_check_set_versions"] == [CHECK_SET_VERSION]
+        assert variant(report)["candidate_check_set_version"] == CHECK_SET_VERSION
+
+    def test_results_graded_by_other_checks_are_not_compared(self, api: TestClient) -> None:
+        baseline, candidate = test_run(api, GOOD), test_run(api, BAD)
+        with get_sessionmaker()() as db:  # as if graded before the current check set
+            result = db.scalars(
+                select(EvaluationResultRecord).where(
+                    EvaluationResultRecord.test_run_id == baseline,
+                    EvaluationResultRecord.variant_id == SHIPPED,
+                )
+            ).one()
+            result.check_set_version = "checks-v1"
+            db.commit()
+
+        report = compare(api, baseline, candidate).json()
+
+        changed = variant(report)
+        assert changed["category"] == "checks_changed" and not changed["gated"]
+        assert "checks-v1 → checks-v2" in changed["explanation"]
+        assert report["baseline_check_set_versions"] == ["checks-v1", "checks-v2"]
+        codes = {r["code"] for r in report["gate"]["reasons"]}
+        assert "checks_changed" in codes and "new_critical_failures" not in codes
+        # Its critical failure is excluded from the metrics as well as from the gate.
+        assert report["candidate_metrics"]["variants"] == 1
+        assert rerun(api, report["id"], GOOD, variant_ids=[SHIPPED]).status_code == 422
+
+    def test_unknown_check_sets_are_never_compared(self, api: TestClient) -> None:
+        baseline, candidate = test_run(api, GOOD), test_run(api, BAD)
+        with get_sessionmaker()() as db:  # results stored before versioning existed
+            for result in db.scalars(
+                select(EvaluationResultRecord).where(
+                    EvaluationResultRecord.test_run_id.in_([baseline, candidate])
+                )
+            ):
+                result.check_set_version = None
+            db.commit()
+
+        report = compare(api, baseline, candidate).json()
+
+        assert {v["category"] for v in report["variants"]} == {"checks_changed"}
+        assert report["gate_status"] == "fail"
+        assert {r["code"]: r["level"] for r in report["gate"]["reasons"]}["nothing_to_gate"] == (
+            "fail"
+        )
+        assert report["baseline_check_set_versions"] == [None]
 
 
 class TestIncompatible:

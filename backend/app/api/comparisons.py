@@ -98,6 +98,8 @@ class ReportSummary(BaseModel):
     candidate_run_id: int
     baseline_agent_version: str
     candidate_agent_version: str
+    baseline_check_set_versions: list[str | None]
+    candidate_check_set_versions: list[str | None]
     gate_status: str
     counts: dict[str, int]
     created_at: datetime
@@ -117,6 +119,8 @@ class VariantView(BaseModel):
     candidate_verdict: str | None
     baseline_scenario_hash: str | None
     candidate_scenario_hash: str | None
+    baseline_check_set_version: str | None
+    candidate_check_set_version: str | None
     new_critical_failures: list[str]
     resolved_critical_failures: list[str]
     new_failed_checks: list[str]

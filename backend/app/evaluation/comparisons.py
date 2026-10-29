@@ -108,6 +108,8 @@ def _save(
         candidate_run_id=candidate.id,
         baseline_agent_version=baseline.agent_version,
         candidate_agent_version=candidate.agent_version,
+        baseline_check_set_versions=comparison.baseline_check_set_versions,
+        candidate_check_set_versions=comparison.candidate_check_set_versions,
         revision=revision,
         root_report_id=root.id if root else None,
         rerun_id=rerun.id if rerun else None,
@@ -343,6 +345,10 @@ def render_report(report: RegressionReportRecord) -> str:
         f"Regression report {report.id} (revision {report.revision}): "
         f"{report.candidate_agent_version} run {report.candidate_run_id} vs "
         f"{report.baseline_agent_version} run {report.baseline_run_id}",
+        "Check sets: baseline "
+        + _check_sets(report.baseline_check_set_versions)
+        + ", candidate "
+        + _check_sets(report.candidate_check_set_versions),
         f"GATE: {report.gate_status.upper()}",
     ]
     for reason in gate["reasons"]:
@@ -368,6 +374,10 @@ def render_report(report: RegressionReportRecord) -> str:
                 f" ({_signed(delta['delta'])}{change})"
             )
     return "\n".join(lines)
+
+
+def _check_sets(versions: list[str | None]) -> str:
+    return " + ".join(v or "unknown" for v in versions) or "unknown"
 
 
 def _signed(value: float | None) -> str:

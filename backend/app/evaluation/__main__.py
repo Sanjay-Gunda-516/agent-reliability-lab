@@ -78,7 +78,11 @@ def _show(run_id: int) -> int:
         if run is None:
             print(f"No test run {run_id}", file=sys.stderr)
             return 1
-        print(f"Run {run.id}: {run.status}, {run.variant_count} variants, judge={run.judge_model}")
+        print(
+            f"Run {run.id}: {run.status}, {run.variant_count} variants, "
+            f"agent {run.agent_version}, checks {run.check_set_version or 'unknown'}, "
+            f"judge={run.judge_model}"
+        )
         metrics = compute_metrics(load_summaries(db, run_id))
         print(json.dumps(metrics.model_dump(mode="json"), indent=2))
         failed = db.execute(
@@ -116,6 +120,8 @@ def _print_report(report: RegressionReportRecord, as_json: bool) -> None:
             "root_report_id": report.root_report_id,
             "baseline_run_id": report.baseline_run_id,
             "candidate_run_id": report.candidate_run_id,
+            "baseline_check_set_versions": report.baseline_check_set_versions,
+            "candidate_check_set_versions": report.candidate_check_set_versions,
             "gate_status": report.gate_status, "gate": report.gate,
             "thresholds": report.thresholds, "counts": report.counts,
             "metric_deltas": report.metric_deltas,

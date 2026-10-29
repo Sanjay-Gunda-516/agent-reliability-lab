@@ -14,6 +14,14 @@ from app.scenarios.schema import Scenario
 
 Check = Callable[[Scenario, ScenarioRun], list[CheckResult]]
 
+# The version of the deterministic grading below, stored with every run and result so
+# that runs graded by different rules are never compared as if they were the same.
+# Bump it whenever a change could alter a check result or verdict; a fingerprint test
+# (tests/unit/test_check_set_version.py) flags changes to this file and results.py.
+#   checks-v1  the original Phase 5 checks (results stored before versioning show null)
+#   checks-v2  adds tools.lookup_before_action
+CHECK_SET_VERSION = "checks-v2"
+
 # Tool errors that are the agent's own mistake (not an outage it had to cope with).
 AGENT_TOOL_MISTAKES = frozenset({"invalid_arguments", "unknown_tool", "repeated_call"})
 
