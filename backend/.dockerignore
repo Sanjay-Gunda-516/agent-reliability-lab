@@ -1,0 +1,12 @@
+# Only what the image needs: pyproject.toml, constraints.txt, alembic*, app/, scenarios/.
+*
+!pyproject.toml
+!constraints.txt
+!alembic.ini
+!alembic/
+!app/
+!scenarios/
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
