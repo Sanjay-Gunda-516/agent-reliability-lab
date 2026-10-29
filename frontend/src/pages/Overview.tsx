@@ -66,7 +66,7 @@ function Kpis({ latest, earlier, total }: { latest: CompletedRun; earlier?: Comp
   const tokens = m.tokens.input_tokens + m.tokens.output_tokens;
   const cacheTokens = m.tokens.cache_creation_input_tokens + m.tokens.cache_read_input_tokens;
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       <KpiCard label="Test runs" value={count(total)} icon={Hash} detail="completed, excluding reruns" />
       {RATE_KPIS.map(({ key, label, icon, lowerIsBetter }) => (
         <KpiCard

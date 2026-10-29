@@ -74,7 +74,7 @@ describe("Overview", () => {
 
     renderAt("/");
 
-    expect(screen.getByRole("status", { name: "Loading runs" })).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "Loading runs" })).toBeInTheDocument();
     const alerts = await screen.findAllByRole("alert");
     expect(alerts[0]).toHaveTextContent("database unavailable");
     expect(screen.getAllByRole("button", { name: "Try again" })[0]).toBeEnabled();

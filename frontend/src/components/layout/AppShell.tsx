@@ -26,14 +26,14 @@ export function AppShell() {
           <Sidebar onNavigate={() => setOpen(false)} />
         </SheetContent>
       </Sheet>
-      <div className="lg:pl-64">
+      <div className="min-w-0 lg:pl-64">
         <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-app/90 px-4 py-3 backdrop-blur-sm lg:hidden">
           <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setOpen(true)}>
             <Menu aria-hidden />
           </Button>
           <span className="text-sm font-semibold text-navy">Agent Reliability Lab</span>
         </div>
-        <main id="main" className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main id="main" className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </main>
       </div>

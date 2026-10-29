@@ -16,7 +16,7 @@ interface PanelProps {
 export function Panel({ title, description, action, children, className, flush }: PanelProps) {
   return (
     <section
-      className={cn("rounded-xl border border-border bg-surface shadow-card", className)}
+      className={cn("min-w-0 rounded-xl border border-border bg-surface shadow-card", className)}
     >
       {(title || action) && (
         <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
