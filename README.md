@@ -6,37 +6,61 @@ Architecture and design decisions: [docs/architecture/phase-0-overview.md](docs/
 > Work in progress. A full README with architecture diagrams, measured metrics and
 > screenshots will be added once the evaluation suite has produced real results.
 
-## Local development
+## Run it locally
 
-Requirements: Python 3.12+, Node.js 20+, Docker.
+Requirements: Docker (Desktop) with Compose v2.
 
 ```bash
-# 1. Configure the backend (then set a real POSTGRES_PASSWORD and matching DATABASE_URL)
-cp backend/.env.example backend/.env
-
-# 2. Start PostgreSQL (exposed on localhost:5433)
-docker compose up -d db
-
-# 3. Install the backend into a virtual environment
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-
-# 4. Apply database migrations
-.venv/bin/alembic upgrade head
-
-# 5. Run the API
-.venv/bin/uvicorn app.main:app --reload
+cp backend/.env.example backend/.env   # then set a real POSTGRES_PASSWORD (and DATABASE_URL to match)
+docker compose up --build              # http://localhost:8080
 ```
 
-- API docs: http://localhost:8000/docs
-- Liveness: `GET /health`
-- Readiness (checks the database): `GET /health/ready`
+That starts four services on an internal network:
+
+| Service | What it does | Reachable from the host |
+|---|---|---|
+| `db` | PostgreSQL 17, data in the `pgdata` volume | `127.0.0.1:5433` (for host-side tests and tools) |
+| `migrate` | Runs once: Alembic migrations, LangGraph checkpoint tables, demo seed if empty | — (exits 0, or the stack stops) |
+| `api` | FastAPI, starts only after `migrate` succeeds | — (through the dashboard at `/api`) |
+| `web` | nginx serving the dashboard and forwarding `/api` to `api` | `127.0.0.1:8080` |
+
+Everything runs without Claude or LangSmith credentials. Anything that needs Claude (live
+chat, starting test runs, approval decisions) answers 503 until `ANTHROPIC_API_KEY` is set
+in `backend/.env`. See [docs/containers.md](docs/containers.md) for the images, health
+checks and configuration.
+
+| Task | Command |
+|---|---|
+| First start (build images) | `docker compose up --build` (add `-d` to run in the background) |
+| Normal start | `docker compose up -d` |
+| Status and health | `docker compose ps -a` |
+| Logs | `docker compose logs -f api` (or `web`, `db`, `migrate`) |
+| Stop, keep everything | `docker compose stop` (resume with `docker compose start`) |
+| Remove containers, keep data | `docker compose down` |
+| Full reset, **deletes the database** | `docker compose down -v` |
+| Rebuild after dependency or code changes | `docker compose up -d --build` |
+| Migration status | `docker compose run --rm migrate alembic current` (and `alembic history`) |
+| Re-run migrations | `docker compose run --rm migrate` |
+| Postgres shell | `docker compose exec db psql -U arl agent_reliability_lab` |
+
+Ports can be changed from the shell: `DASHBOARD_PORT=9000 POSTGRES_HOST_PORT=5544 docker compose up -d`.
+
+### Developing with hot reload
+
+Run only the database in Docker and the API and dashboard on the host:
+
+```bash
+docker compose up -d db
+cd backend && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head          # or: python -m app.migrate (also seeds an empty store)
+.venv/bin/uvicorn app.main:app --reload # http://localhost:8000/docs
+cd ../frontend && npm install && npm run dev   # http://localhost:5173
+```
 
 ## Dashboard
 
 A React + TypeScript dashboard for runs, scenario results, traces, regression reports,
-approvals and agent versions. It shows only what the API returns. With the API running:
+approvals and agent versions. It shows only what the API returns. In development:
 
 ```bash
 cd frontend
@@ -49,7 +73,7 @@ See [frontend/README.md](frontend/README.md) for the structure and design tokens
 
 ## Checks
 
-Run from `backend/`:
+Backend, from `backend/` (with `docker compose up -d db` running):
 
 ```bash
 .venv/bin/pytest                      # all tests (integration tests need the db container)
@@ -57,6 +81,8 @@ Run from `backend/`:
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 .venv/bin/mypy
 ```
+
+Frontend, from `frontend/`: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 
 Integration tests run against a separate `<database>_test` database that is
 recreated and migrated on every test session, so they never touch development data.
