@@ -3,6 +3,7 @@ import type { RouteObject } from "react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { NotFound } from "@/pages/NotFound";
 import { Overview } from "@/pages/Overview";
+import { RegressionDetail, RegressionList } from "@/pages/Regression";
 import { ResultDetail } from "@/pages/ResultDetail";
 import { RunDetail } from "@/pages/RunDetail";
 import { ScenarioPage, Scenarios } from "@/pages/Scenarios";
@@ -22,6 +23,8 @@ export const routes: RouteObject[] = [
       { path: "scenarios/:scenarioId", element: <ScenarioPage /> },
       { path: "traces", element: <Traces /> },
       { path: "traces/:executionId", element: <TraceDetail /> },
+      { path: "regression", element: <RegressionList /> },
+      { path: "regression/:reportId", element: <RegressionDetail /> },
       { path: "*", element: <NotFound /> },
     ],
   },
