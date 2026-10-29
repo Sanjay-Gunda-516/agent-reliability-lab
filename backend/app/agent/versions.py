@@ -90,8 +90,10 @@ def sync_agent_versions(db: Session) -> list[AgentVersionRecord]:
             )
             db.add(record)
             stored[version.name] = record
-        elif record.config_hash != digest and not record.defined_in_code and (
-            record.config == version.config_dict()
+        elif (
+            record.config_hash != digest
+            and not record.defined_in_code
+            and (record.config == version.config_dict())
         ):
             # Backfilled by the migration from old runs: its hash couldn't include the
             # prompt texts, but the config is identical, so it's this version.

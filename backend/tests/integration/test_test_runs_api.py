@@ -147,7 +147,7 @@ def test_cli_asks_before_spending_and_creates_nothing_when_declined(
 
     out = capsys.readouterr().out
     assert code == 1 and "Cancelled." in out
-    assert "cancel-eligible-order:angry" in out and "3 variant(s), judge=on" in out
+    assert "cancel-eligible-order:angry" in out and "3 variant(s), agent v1, judge=on" in out
     assert run_count() == before
 
 
