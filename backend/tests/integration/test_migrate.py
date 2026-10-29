@@ -54,7 +54,9 @@ def test_waits_for_another_runner_instead_of_racing() -> None:
     finished = threading.Event()
     with holder.connect() as conn:
         conn.execute(text("SELECT pg_advisory_lock(:id)"), {"id": migrate_module.MIGRATION_LOCK_ID})
-        runner = threading.Thread(target=lambda: (migrate_module.main(), finished.set()), daemon=True)
+        runner = threading.Thread(
+            target=lambda: (migrate_module.main(), finished.set()), daemon=True
+        )
         runner.start()
         # Longer than the app's 5 s statement timeout would allow, had it applied.
         assert not finished.wait(6)
