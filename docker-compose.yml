@@ -1,10 +1,36 @@
+# The whole lab locally:  docker compose up --build   ->  http://localhost:8080
+#
+#   browser -> web (nginx, :8080) -> /api -> api (FastAPI, :8000) -> db (Postgres, :5432)
+#
+# Configuration comes from backend/.env (copy backend/.env.example). Only the dashboard
+# and, for host-side tests and tools, Postgres are published, both on 127.0.0.1 only.
+
+name: agent-reliability-lab
+
+x-backend: &backend
+  image: agent-reliability-lab/api:local
+  build: ./backend
+  env_file:
+    - path: backend/.env
+      required: true
+  environment:
+    # Inside the network Postgres is db:5432. An empty DATABASE_URL makes the app build
+    # the URL from the POSTGRES_* values in backend/.env (same user, password, database).
+    DATABASE_URL: ""
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    ENVIRONMENT: production
+  networks: [lab]
+
 services:
   db:
     image: postgres:17-alpine
     env_file:
-      - backend/.env
+      - path: backend/.env
+        required: true
     ports:
-      - "127.0.0.1:5433:5432"
+      # For host-side pytest, Alembic and `uvicorn --reload`. Loopback only.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -12,6 +38,47 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+    networks: [lab]
+
+  # Runs once per `up`: migrations, LangGraph checkpoint tables, demo seed if empty.
+  # The API only starts if this exits 0; see `docker compose logs migrate` otherwise.
+  migrate:
+    <<: *backend
+    command: ["python", "-m", "app.migrate"]
+    healthcheck:
+      disable: true  # the image's check is for the API; this container just runs and exits
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Not published: reached through the dashboard at /api. Health: GET /health/ready.
+    expose: ["8000"]
+    restart: unless-stopped
+
+  web:
+    image: agent-reliability-lab/web:local
+    build: ./frontend
+    environment:
+      API_UPSTREAM: api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    restart: unless-stopped
+    networks: [lab]
+
+networks:
+  lab: {}
 
 volumes:
-  pgdata:
+  pgdata: {}
