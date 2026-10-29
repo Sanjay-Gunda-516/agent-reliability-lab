@@ -186,11 +186,44 @@ def create_run(
     return run
 
 
-@router.get("", response_model=list[TestRunSummary])
+class TestRunListItem(TestRunSummary):
+    # The snapshot stored when the run finished; null while it's queued or running.
+    metrics: RunMetrics | None
+
+
+def _stored_metrics(run: TestRunRecord) -> RunMetrics | None:
+    if run.metrics is None:
+        return None
+    try:
+        return RunMetrics.model_validate(run.metrics)
+    except ValueError:  # a snapshot from an older metrics shape
+        return None
+
+
+@router.get("", response_model=list[TestRunListItem])
 def list_runs(
-    db: DbSession, limit: Annotated[int, Query(ge=1, le=100)] = 20
-) -> list[TestRunRecord]:
-    return list(db.scalars(select(TestRunRecord).order_by(TestRunRecord.id.desc()).limit(limit)))
+    db: DbSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    agent_version: str | None = None,
+    run_status: Annotated[
+        str | None, Query(alias="status", pattern="^(queued|running|completed|failed)$")
+    ] = None,
+    include_reruns: bool = True,
+) -> list[TestRunListItem]:
+    query = select(TestRunRecord)
+    if agent_version is not None:
+        query = query.where(TestRunRecord.agent_version == agent_version)
+    if run_status is not None:
+        query = query.where(TestRunRecord.status == run_status)
+    if not include_reruns:
+        query = query.where(TestRunRecord.rerun_id.is_(None))
+    runs = db.scalars(query.order_by(TestRunRecord.id.desc()).limit(limit))
+    return [
+        TestRunListItem.model_validate(
+            {**TestRunSummary.model_validate(run).model_dump(), "metrics": _stored_metrics(run)}
+        )
+        for run in runs
+    ]
 
 
 @router.get("/{test_run_id}", response_model=TestRunDetail)
