@@ -7,6 +7,8 @@ import { ResultDetail } from "@/pages/ResultDetail";
 import { RunDetail } from "@/pages/RunDetail";
 import { ScenarioPage, Scenarios } from "@/pages/Scenarios";
 import { TestRuns } from "@/pages/TestRuns";
+import { TraceDetail } from "@/pages/TraceDetail";
+import { Traces } from "@/pages/Traces";
 
 export const routes: RouteObject[] = [
   {
@@ -18,6 +20,8 @@ export const routes: RouteObject[] = [
       { path: "runs/:runId/results/:variantId", element: <ResultDetail /> },
       { path: "scenarios", element: <Scenarios /> },
       { path: "scenarios/:scenarioId", element: <ScenarioPage /> },
+      { path: "traces", element: <Traces /> },
+      { path: "traces/:executionId", element: <TraceDetail /> },
       { path: "*", element: <NotFound /> },
     ],
   },
