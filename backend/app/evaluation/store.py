@@ -76,7 +76,7 @@ def save_result(
     test_run_id: int,
     evaluated: EvaluatedVariant,
     *,
-    agent_version: str = "default",
+    agent_version: str,
     model: str = "",
 ) -> EvaluationResultRecord:
     run, summary, judge = evaluated.run, evaluated.summary, evaluated.judge_result
@@ -173,6 +173,10 @@ def load_summaries(db: Session, test_run_id: int) -> list[VariantSummary]:
             cost_usd=r.estimated_cost_usd,
             judge_tokens=TokenTotals.model_validate(r.judge_usage) if r.judge_usage else None,
             judge_cost_usd=r.judge_cost_usd,
+            scenario_id=r.scenario_id,
+            scenario_hash=r.scenario_hash,
+            result_id=r.id,
+            test_run_id=r.test_run_id,
         )
         for r in results
     ]

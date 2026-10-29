@@ -11,6 +11,7 @@ from app.agent.config import AgentConfig
 from app.agent.llm import ClaudeClient, LLMClient
 from app.agent.service import AgentRunResult, ExecutionPaused, run_agent
 from app.agent.state import EscalationReason, IntentResult, ToolCallRecord
+from app.agent.versions import DEFAULT_AGENT_VERSION, get_version
 from app.config import get_settings
 from app.db.lab_models import ExecutionTraceRecord
 from app.db.models import Customer
@@ -81,7 +82,7 @@ def run(
     if db.get(Customer, request.customer_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found.")
 
-    config = AgentConfig()
+    config = get_version(DEFAULT_AGENT_VERSION).config
     trace = _trace_to_continue(db, request) if request.execution_id else None
     recorder = continue_recorder(trace) if trace else TraceRecorder()
     started_at = datetime.now(UTC)
@@ -175,7 +176,7 @@ def _save_trace(
                 source="api",
                 customer_id=request.customer_id,
                 model=config.model,
-                agent_version="default",
+                agent_version=DEFAULT_AGENT_VERSION,
                 status=result.status,
                 escalation_reason=result.escalation_reason,
                 started_at=started_at,

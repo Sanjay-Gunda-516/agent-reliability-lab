@@ -8,8 +8,13 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient
+from app.agent.versions import (
+    DEFAULT_AGENT_VERSION,
+    AgentVersionConflict,
+    UnknownAgentVersion,
+    get_version,
+)
 from app.api.agent import get_llm_client
 from app.config import get_settings
 from app.db.lab_models import (
@@ -33,7 +38,7 @@ router = APIRouter(prefix="/test-runs", tags=["test runs"])
 
 class CreateTestRunRequest(RunSelection):
     judge: bool = False
-    agent_version: str = "default"
+    agent_version: str = DEFAULT_AGENT_VERSION
 
 
 class TestRunSummary(BaseModel):
@@ -46,6 +51,9 @@ class TestRunSummary(BaseModel):
     judge_model: str | None
     variant_count: int
     error: str | None
+    rerun_id: int | None  # set for runs that repeat variants for a regression rerun
+    rerun_side: str | None
+    repetition: int | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -150,6 +158,10 @@ def create_run(
     judge_factory: Annotated[Callable[[], Judge], Depends(get_judge_factory)],
 ) -> TestRunRecord:
     """Start a test run. It executes in the background; poll GET /test-runs/{id}."""
+    try:
+        get_version(request.agent_version)
+    except UnknownAgentVersion as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     judge = judge_factory() if request.judge else None
     selection = RunSelection.model_validate(
         request.model_dump(include=set(RunSelection.model_fields))
@@ -158,12 +170,13 @@ def create_run(
         run = create_test_run(
             db,
             selection,
-            config=AgentConfig(),
             judge_model=judge.model if judge else None,
             agent_version=request.agent_version,
         )
     except SelectionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except AgentVersionConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     background.add_task(
         execute_test_run, run.id, session_factory=get_sessionmaker(), llm=llm, judge=judge

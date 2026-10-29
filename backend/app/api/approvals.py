@@ -17,9 +17,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.agent import approvals
-from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient
 from app.agent.service import NotPaused, resume_agent
+from app.agent.versions import AGENT_VERSIONS, DEFAULT_AGENT_VERSION
 from app.api.agent import get_llm_client
 from app.db.lab_models import ExecutionTraceRecord, HumanApprovalRecord
 from app.db.session import DbSession, get_engine
@@ -145,7 +145,12 @@ def _decide(
                     llm=llm,
                     customer_id=approval.customer_id,
                     recorder=recorder,
-                    config=AgentConfig(),
+                    # Resume with the version that started the conversation.
+                    config=AGENT_VERSIONS[
+                        trace.agent_version
+                        if trace.agent_version in AGENT_VERSIONS
+                        else DEFAULT_AGENT_VERSION
+                    ].config,
                 )
             except NotPaused as exc:
                 raise HTTPException(

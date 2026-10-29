@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -58,6 +59,23 @@ class ScenarioVariantRecord(Base):
     scenario: Mapped[ScenarioRecord] = relationship(back_populates="variants")
 
 
+class AgentVersionRecord(Base):
+    """A named agent configuration (see app/agent/versions.py), recorded when first used."""
+
+    __tablename__ = "agent_versions"
+
+    name: Mapped[str] = mapped_column(String(50), primary_key=True)
+    description: Mapped[str] = mapped_column(Text)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # Config plus the prompt texts it selects; a name never changes meaning.
+    config_hash: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(50))
+    prompt_version: Mapped[str | None] = mapped_column(String(50))
+    # False for versions only known from old runs (e.g. "default" from before Phase 8).
+    defined_in_code: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class TestRunRecord(Base):
     """One execution of a selection of scenario variants against one agent configuration."""
 
@@ -66,8 +84,7 @@ class TestRunRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(20))  # queued | running | completed | failed
-    # A label until agent versions get their own table (Phase 8).
-    agent_version: Mapped[str] = mapped_column(String(50))
+    agent_version: Mapped[str] = mapped_column(ForeignKey("agent_versions.name"), index=True)
     agent_config: Mapped[dict[str, Any]] = mapped_column(JSONB)
     judge_model: Mapped[str | None] = mapped_column(String(50))
     selection: Mapped[dict[str, Any]] = mapped_column(JSONB)
@@ -76,6 +93,10 @@ class TestRunRecord(Base):
     metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
     request_id: Mapped[str | None] = mapped_column(String(64))  # the request that started it
+    # Set when the run repeats variants for a regression rerun.
+    rerun_id: Mapped[int | None] = mapped_column(ForeignKey("regression_reruns.id"), index=True)
+    rerun_side: Mapped[str | None] = mapped_column(String(10))  # baseline | candidate
+    repetition: Mapped[int | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -278,3 +299,90 @@ class HumanApprovalRecord(Base):
     action_result: Mapped[Any] = mapped_column(JSONB, nullable=True)
     resumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RegressionReportRecord(Base):
+    """A comparison of a candidate test run against a baseline run, with its gate verdict.
+
+    Reports are never edited. Rerunning flipped variants creates a new revision whose
+    `root_report_id` points at the original comparison.
+    """
+
+    __tablename__ = "regression_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    baseline_run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id"), index=True)
+    candidate_run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id"), index=True)
+    baseline_agent_version: Mapped[str] = mapped_column(String(50))
+    candidate_agent_version: Mapped[str] = mapped_column(String(50))
+    revision: Mapped[int]  # 1 for the original comparison
+    root_report_id: Mapped[int | None] = mapped_column(ForeignKey("regression_reports.id"))
+    rerun_id: Mapped[int | None] = mapped_column(ForeignKey("regression_reruns.id"))
+    thresholds: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    gate_status: Mapped[str] = mapped_column(String(10))  # pass | warn | fail
+    gate: Mapped[dict[str, Any]] = mapped_column(JSONB)  # reasons, machine-readable
+    counts: Mapped[dict[str, int]] = mapped_column(JSONB)  # variants per category
+    metric_deltas: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    baseline_metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    candidate_metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    variants: Mapped[list["RegressionVariantRecord"]] = relationship(
+        back_populates="report", order_by="RegressionVariantRecord.id"
+    )
+
+
+class RegressionVariantRecord(Base):
+    """How one scenario variant compared within a report."""
+
+    __tablename__ = "regression_variant_results"
+    __table_args__ = (UniqueConstraint("report_id", "variant_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("regression_reports.id"), index=True)
+    variant_id: Mapped[str] = mapped_column(String(120))
+    scenario_id: Mapped[str] = mapped_column(String(80))
+    # regression | confirmed_regression | improvement | unchanged | noisy | scenario_changed
+    # | missing_in_candidate | new_in_candidate
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    gated: Mapped[bool]  # counted by the gate (paired, same scenario content, not noisy)
+    needs_rerun: Mapped[bool]
+    baseline_result_id: Mapped[int | None] = mapped_column(ForeignKey("evaluation_results.id"))
+    candidate_result_id: Mapped[int | None] = mapped_column(ForeignKey("evaluation_results.id"))
+    baseline_verdict: Mapped[str | None] = mapped_column(String(10))
+    candidate_verdict: Mapped[str | None] = mapped_column(String(10))
+    baseline_scenario_hash: Mapped[str | None] = mapped_column(String(64))
+    candidate_scenario_hash: Mapped[str | None] = mapped_column(String(64))
+    new_critical_failures: Mapped[list[str]] = mapped_column(JSONB)
+    resolved_critical_failures: Mapped[list[str]] = mapped_column(JSONB)
+    new_failed_checks: Mapped[list[str]] = mapped_column(JSONB)
+    fixed_checks: Mapped[list[str]] = mapped_column(JSONB)
+    latency_delta_ms: Mapped[float | None]
+    cost_delta_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    explanation: Mapped[str] = mapped_column(Text)
+    rerun_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    report: Mapped[RegressionReportRecord] = relationship(back_populates="variants")
+
+
+class RegressionRerunRecord(Base):
+    """A request to repeat flipped variants k times, to tell noise from real regressions."""
+
+    __tablename__ = "regression_reruns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_id: Mapped[int] = mapped_column(
+        ForeignKey("regression_reports.id", use_alter=True), index=True
+    )  # always the original (revision 1) report
+    repetitions: Mapped[int] = mapped_column(Integer)
+    sides: Mapped[str] = mapped_column(String(10))  # candidate | both
+    variant_ids: Mapped[list[str]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(20))  # queued | running | completed | failed
+    error: Mapped[str | None] = mapped_column(Text)
+    result_report_id: Mapped[int | None] = mapped_column(
+        ForeignKey("regression_reports.id", use_alter=True)
+    )
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

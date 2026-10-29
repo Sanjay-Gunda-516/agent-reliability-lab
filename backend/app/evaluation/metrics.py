@@ -84,6 +84,11 @@ class VariantSummary:
     cost_usd: Decimal | None
     judge_tokens: TokenTotals | None = None
     judge_cost_usd: Decimal | None = None
+    # Where the result came from; used to pair results when comparing runs.
+    scenario_id: str = ""
+    scenario_hash: str = ""
+    result_id: int | None = None
+    test_run_id: int | None = None
 
 
 def _percentile(values: list[float], pct: float) -> float | None:

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.agent.config import AgentConfig
 from app.agent.llm import LLMClient
+from app.agent.versions import DEFAULT_AGENT_VERSION, get_version, sync_agent_versions
 from app.db.lab_models import ScenarioRecord, TestRunRecord
 from app.evaluation.evaluate import EvaluatedVariant, evaluate_variant
 from app.evaluation.judge import Judge
@@ -68,13 +69,25 @@ def create_test_run(
     db: Session,
     selection: RunSelection,
     *,
-    config: AgentConfig,
     judge_model: str | None,
-    agent_version: str = "default",
+    agent_version: str = DEFAULT_AGENT_VERSION,
+    config: AgentConfig | None = None,
+    rerun_id: int | None = None,
+    rerun_side: str | None = None,
+    repetition: int | None = None,
 ) -> TestRunRecord:
+    """Queue a run of `agent_version`.
+
+    `config` overrides the version's config. Reruns use it to repeat exactly what an
+    earlier run used, and tests use it to skip retry delays. The run always stores the
+    config it actually used.
+    """
     # Sync first so the run is evaluated against exactly the scenario versions stored now.
     scenarios = load_scenarios()
     sync_scenarios(db, scenarios)
+    sync_agent_versions(db)
+    if config is None:
+        config = get_version(agent_version).config
     cases = _cases(scenarios, selection)
     if not cases:
         raise SelectionError("the selection matches no scenario variants")
@@ -87,6 +100,9 @@ def create_test_run(
         judge_model=judge_model,
         selection=selection.model_dump(mode="json"),
         variant_count=len(cases),
+        rerun_id=rerun_id,
+        rerun_side=rerun_side,
+        repetition=repetition,
     )
     db.add(run)
     db.commit()
