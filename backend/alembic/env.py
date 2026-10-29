@@ -1,3 +1,4 @@
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,8 +12,9 @@ from app.db.base import Base
 
 config = context.config
 
-if config.config_file_name is not None:
-    # Keep app loggers alive when migrations run in-process (e.g. from tests).
+# Use alembic.ini's logging only for the plain `alembic` command; when migrations run
+# in-process (app.migrate, tests) the app's own logging is already set up.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata

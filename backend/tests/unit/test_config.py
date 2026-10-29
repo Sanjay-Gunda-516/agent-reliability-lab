@@ -35,6 +35,36 @@ def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
         load_settings()
 
 
+def test_database_url_can_be_built_from_parts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    for key, value in {
+        "POSTGRES_HOST": "db",
+        "POSTGRES_USER": "arl",
+        "POSTGRES_PASSWORD": "p@ss/word",
+        "POSTGRES_DB": "lab",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    settings = load_settings()
+
+    assert settings.database_url == "postgresql+psycopg://arl:p%40ss%2Fword@db:5432/lab"
+
+
+def test_explicit_database_url_wins_over_parts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+
+    assert load_settings().database_url == DB_URL
+
+
+def test_empty_database_url_with_missing_parts_names_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        load_settings()
+
+
 def test_rejects_unknown_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", DB_URL)
     monkeypatch.setenv("ENVIRONMENT", "staging")
